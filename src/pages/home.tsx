@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -12,12 +12,11 @@ import PublicIcon from "@mui/icons-material/Public";
 
 export type NivelGestao = "municipal" | "estadual";
 
-// Função utilitária para salvar o nível no sessionStorage
+// Funções utilitárias
 export const salvarNivelGestao = (nivel: NivelGestao) => {
   sessionStorage.setItem("nivelGestao", nivel);
 };
 
-// Função utilitária para ler o nível salvo
 export const obterNivelGestao = (): NivelGestao | null => {
   const nivel = sessionStorage.getItem("nivelGestao");
   return nivel === "municipal" || nivel === "estadual" ? nivel : null;
@@ -25,8 +24,9 @@ export const obterNivelGestao = (): NivelGestao | null => {
 
 export default function Home() {
   const navigate = useNavigate();
+  const [arquivo, setArquivo] = useState<File | null>(null);
 
-  // Função de seleção de nível
+  // Seleção de nível
   const handleSelectNivel = useCallback(
     (nivel: NivelGestao) => {
       salvarNivelGestao(nivel);
@@ -35,22 +35,29 @@ export default function Home() {
     [navigate]
   );
 
-  // Botões de seleção configuráveis
-  const botoes: { nivel: NivelGestao; title: string; subtitle: string; icon: React.ReactNode; }[] =
-    [
-      {
-        nivel: "municipal",
-        title: "Municipal",
-        subtitle: "Seleção de um único município",
-        icon: <LocationCityIcon sx={{ fontSize: 40 }} />,
-      },
-      {
-        nivel: "estadual",
-        title: "Estadual",
-        subtitle: "Seleção de múltiplos municípios da UF",
-        icon: <PublicIcon sx={{ fontSize: 40 }} />,
-      },
-    ];
+  // Seleção de arquivo
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files[0]) {
+      setArquivo(event.target.files[0]);
+      console.log("Arquivo selecionado:", event.target.files[0]);
+    }
+  };
+
+  // Botões de seleção
+  const botoes: { nivel: NivelGestao; title: string; subtitle: string; icon: React.ReactNode }[] = [
+    {
+      nivel: "municipal",
+      title: "Municipal",
+      subtitle: "Seleção de um único município",
+      icon: <LocationCityIcon sx={{ fontSize: 40 }} />,
+    },
+    {
+      nivel: "estadual",
+      title: "Estadual",
+      subtitle: "Seleção de múltiplos municípios da UF",
+      icon: <PublicIcon sx={{ fontSize: 40 }} />,
+    },
+  ];
 
   return (
     <Box
@@ -65,29 +72,15 @@ export default function Home() {
     >
       <Card sx={{ width: "100%", maxWidth: 520, boxShadow: 3 }}>
         <CardContent sx={{ p: 4 }}>
-          <Typography
-            variant="h5"
-            fontWeight={600}
-            textAlign="center"
-            gutterBottom
-          >
+          <Typography variant="h5" fontWeight={600} textAlign="center" gutterBottom>
             Projeto Mais Médicos Especialistas
           </Typography>
 
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            textAlign="center"
-            mb={4}
-          >
+          <Typography variant="body2" color="text.secondary" textAlign="center" mb={4}>
             Selecione o nível de gestão para iniciar o processo
           </Typography>
 
-          <Box
-            display="grid"
-            gridTemplateColumns={{ xs: "1fr", sm: "1fr 1fr" }}
-            gap={2}
-          >
+          <Box display="grid" gridTemplateColumns={{ xs: "1fr", sm: "1fr 1fr" }} gap={2} mb={3}>
             {botoes.map((botao) => (
               <Button
                 key={botao.nivel}
@@ -109,6 +102,20 @@ export default function Home() {
               </Button>
             ))}
           </Box>
+
+          {/* Botão para anexar arquivo */}
+          <input
+            type="file"
+            id="file-upload"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+            accept=".pdf,.doc,.docx"
+          />
+          <label htmlFor="file-upload">
+            <Button variant="contained" component="span" fullWidth>
+              {arquivo ? `Arquivo selecionado: ${arquivo.name}` : "Anexar Documento Assinado"}
+            </Button>
+          </label>
         </CardContent>
       </Card>
     </Box>
