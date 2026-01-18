@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Card,
@@ -8,16 +8,34 @@ import {
   Button,
   Divider,
   MenuItem,
+  CircularProgress,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
-import { estadosRecurso } from "../data/ufIbge";
 
-// Schema de validação incluindo município
+// =====================
+// Tipagens
+// =====================
+interface Estado {
+  id: number;
+  uf: string;
+  nome: string;
+  ibge: string;
+}
+
+interface Municipio {
+  id: number;
+  nome: string;
+  ibge: string;
+}
+
+// =====================
+// Schema
+// =====================
 const schema = yup.object({
   uf: yup.string().required("UF é obrigatória"),
   ibge: yup.string().required("Código IBGE é obrigatório"),
-  nomeEstado: yup.string().required("Nome do Estado é obrigatório"),
+  nomeEstado: yup.string().required("Nome do estado é obrigatório"),
   municipio: yup.string().required("Município é obrigatório"),
 });
 
@@ -32,32 +50,68 @@ export default function DadosEstado() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [municipios, setMunicipios] = useState<{ nome: string; ibge: string }[]>([]);
+  const [estados, setEstados] = useState<Estado[]>([]);
+  const [municipios, setMunicipios] = useState<Municipio[]>([]);
+  const [loadingEstados, setLoadingEstados] = useState(true);
+  const [loadingMunicipios, setLoadingMunicipios] = useState(false);
 
-  // Atualiza estado e lista de municípios ao selecionar UF
-  const handleUFChange = (uf: string) => {
-    const estado = estadosRecurso.find((e) => e.uf === uf);
+  // =====================
+  // Buscar estados
+  // =====================
+  useEffect(() => {
+    async function carregarEstados() {
+      try {
+        const res = await fetch("http://localhost:3000/localidades/estados");
+        const data = await res.json();
+        setEstados(data);
+      } catch (error) {
+        console.error("Erro ao carregar estados", error);
+      } finally {
+        setLoadingEstados(false);
+      }
+    }
+
+    carregarEstados();
+  }, []);
+
+  // =====================
+  // Ao selecionar UF
+  // =====================
+  const handleUFChange = async (uf: string) => {
+    const estado = estados.find((e) => e.uf === uf);
     if (!estado) return;
 
     setValues({
       uf: estado.uf,
       ibge: estado.ibge,
       nomeEstado: estado.nome,
-      municipio: "", // resetar município ao mudar UF
+      municipio: "",
     });
 
-    setMunicipios(estado.municipios || []);
     setErrors({});
+    setLoadingMunicipios(true);
+    setMunicipios([]);
+
+    try {
+      const res = await fetch(
+        `http://localhost:3000/localidades/municipios/${uf}`
+      );
+      const data = await res.json();
+      setMunicipios(data);
+    } catch (error) {
+      console.error("Erro ao carregar municípios", error);
+    } finally {
+      setLoadingMunicipios(false);
+    }
   };
 
-  // Submissão com validação
+  // =====================
+  // Submit
+  // =====================
   const handleSubmit = async () => {
     try {
       await schema.validate(values, { abortEarly: false });
-
-      // Salva no sessionStorage
       sessionStorage.setItem("dadosEstado", JSON.stringify(values));
-
       navigate("/form-vagas");
     } catch (err: any) {
       const validationErrors: Record<string, string> = {};
@@ -68,6 +122,9 @@ export default function DadosEstado() {
     }
   };
 
+  // =====================
+  // Render
+  // =====================
   return (
     <Box
       sx={{
@@ -94,7 +151,7 @@ export default function DadosEstado() {
             Preencha os dados do ente estadual responsável
           </Typography>
 
-          {/* SELECT UF */}
+          {/* UF */}
           <TextField
             select
             label="UF do Estado"
@@ -104,17 +161,24 @@ export default function DadosEstado() {
             helperText={errors.uf}
             onChange={(e) => handleUFChange(e.target.value)}
             sx={{ mb: 3 }}
+            disabled={loadingEstados}
           >
             <MenuItem value="">
               <em>Selecione</em>
             </MenuItem>
 
-            {estadosRecurso.map((estado) => (
-              <MenuItem key={estado.uf} value={estado.uf}>
+            {estados.map((estado) => (
+              <MenuItem key={estado.id} value={estado.uf}>
                 {estado.uf}
               </MenuItem>
             ))}
           </TextField>
+
+          {loadingEstados && (
+            <Box textAlign="center" mb={3}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
 
           {/* IBGE */}
           <TextField
@@ -129,7 +193,7 @@ export default function DadosEstado() {
 
           {/* Nome */}
           <TextField
-            label="Nome do Estado"
+            label="Nome do estado"
             fullWidth
             value={values.nomeEstado}
             error={!!errors.nomeEstado}
@@ -138,7 +202,7 @@ export default function DadosEstado() {
             sx={{ mb: 3 }}
           />
 
-          {/* SELECT Município */}
+          {/* Município */}
           <TextField
             select
             label="Município"
@@ -146,20 +210,28 @@ export default function DadosEstado() {
             value={values.municipio}
             error={!!errors.municipio}
             helperText={errors.municipio}
-            onChange={(e) => setValues({ ...values, municipio: e.target.value })}
+            onChange={(e) =>
+              setValues({ ...values, municipio: e.target.value })
+            }
             sx={{ mb: 3 }}
-            disabled={!values.uf} // só habilita se UF estiver selecionado
+            disabled={!values.uf || loadingMunicipios}
           >
             <MenuItem value="">
               <em>Selecione</em>
             </MenuItem>
 
             {municipios.map((mun) => (
-              <MenuItem key={mun.ibge} value={mun.nome}>
+              <MenuItem key={mun.id} value={mun.nome}>
                 {mun.nome}
               </MenuItem>
             ))}
           </TextField>
+
+          {loadingMunicipios && (
+            <Box textAlign="center" mb={3}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
 
           <Divider sx={{ my: 3 }} />
 

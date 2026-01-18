@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Card,
@@ -11,7 +11,7 @@ import {
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
-import { estadosRecurso } from "../data/ufIbge";
+import axios from "axios";
 
 // Schema de validação
 const schema = yup.object({
@@ -20,6 +20,16 @@ const schema = yup.object({
   municipio: yup.string().required("Município é obrigatório"),
   ibgeMunicipio: yup.string().required("Código IBGE do município é obrigatório"),
 });
+
+type Estado = {
+  uf: string;
+  nome: string;
+};
+
+type Municipio = {
+  nome: string;
+  ibge: string;
+};
 
 export default function DadosMunicipio() {
   const navigate = useNavigate();
@@ -32,44 +42,67 @@ export default function DadosMunicipio() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [municipios, setMunicipios] = useState<{ nome: string; ibge: string }[]>([]);
+  const [estados, setEstados] = useState<Estado[]>([]);
+  const [municipios, setMunicipios] = useState<Municipio[]>([]);
 
-  // Atualiza UF, nome do estado e lista de municípios
-  const handleUFChange = (uf: string) => {
-    const estado = estadosRecurso.find((e) => e.uf === uf);
-    if (!estado) return;
+  // 🔹 Carrega estados ao montar a página
+  useEffect(() => {
+    async function carregarEstados() {
+      const response = await axios.get<Estado[]>(
+        "http://localhost:3000/localidades/estados"
+      );
+      setEstados(response.data);
+    }
+
+    carregarEstados();
+    
+  }, []);
+  
+
+  // 🔹 Quando seleciona UF
+  const handleUFChange = async (uf: string) => {
+    const estadoSelecionado = estados.find((e) => e.uf === uf);
+    if (!estadoSelecionado) return;
 
     setValues({
-      uf: estado.uf,
-      nomeEstado: estado.nome,
+      uf,
+      nomeEstado: estadoSelecionado.nome,
       municipio: "",
       ibgeMunicipio: "",
     });
 
-    setMunicipios(estado.municipios || []);
     setErrors({});
+    setMunicipios([]);
+
+    // Busca municípios da UF
+    const response = await axios.get<Municipio[]>(
+      `http://localhost:3000/localidades/municipios?uf=${uf}`
+    );
+
+    setMunicipios(response.data);
   };
 
-  // Atualiza município e IBGE do município
+  // 🔹 Quando seleciona município
   const handleMunicipioChange = (municipioNome: string) => {
     const mun = municipios.find((m) => m.nome === municipioNome);
+
     setValues((prev) => ({
       ...prev,
       municipio: municipioNome,
       ibgeMunicipio: mun ? mun.ibge : "",
     }));
+
     setErrors((prev) => ({ ...prev, municipio: "", ibgeMunicipio: "" }));
   };
 
-  // Submissão
+  // 🔹 Submissão final
   const handleSubmit = async () => {
     try {
       await schema.validate(values, { abortEarly: false });
 
-      // Salva no sessionStorage
       sessionStorage.setItem("dadosMunicipio", JSON.stringify(values));
 
-      navigate("/form-vagas"); // ajuste a rota conforme seu fluxo
+      navigate("/form-vagas");
     } catch (err: any) {
       const validationErrors: Record<string, string> = {};
       err.inner?.forEach((error: any) => {
@@ -84,10 +117,10 @@ export default function DadosMunicipio() {
       sx={{
         width: "100vw",
         height: "100vh",
-        backgroundColor: "#ffffff",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        backgroundColor: "#fff",
       }}
     >
       <Card sx={{ width: "100%", maxWidth: 560, boxShadow: 3 }}>
@@ -102,10 +135,10 @@ export default function DadosMunicipio() {
             textAlign="center"
             mb={3}
           >
-            Selecione o estado e município para preenchimento do IBGE
+            Selecione o estado e o município
           </Typography>
 
-          {/* SELECT UF */}
+          {/* UF */}
           <TextField
             select
             label="UF do Estado"
@@ -119,7 +152,7 @@ export default function DadosMunicipio() {
             <MenuItem value="">
               <em>Selecione</em>
             </MenuItem>
-            {estadosRecurso.map((estado) => (
+            {estados.map((estado) => (
               <MenuItem key={estado.uf} value={estado.uf}>
                 {estado.uf}
               </MenuItem>
@@ -135,7 +168,7 @@ export default function DadosMunicipio() {
             sx={{ mb: 3 }}
           />
 
-          {/* SELECT Município */}
+          {/* Município */}
           <TextField
             select
             label="Município"
@@ -157,7 +190,7 @@ export default function DadosMunicipio() {
             ))}
           </TextField>
 
-          {/* IBGE Município */}
+          {/* IBGE */}
           <TextField
             label="Código IBGE do Município"
             fullWidth
