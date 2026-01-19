@@ -6,6 +6,7 @@ export interface Curso {
 }
 
 export interface Estabelecimento {
+  id?: string;
   nome: string;
   cnes: string;
   cursos: Curso[];

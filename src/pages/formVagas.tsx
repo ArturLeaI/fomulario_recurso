@@ -30,6 +30,14 @@ export default function FormularioVagasMunicipio() {
     sessionStorage.getItem("dadosMunicipio") || "{}"
   );
 
+
+  const [municipioId, setMunicipioId] = useState<number | null>(
+    dadosMunicipioAnterior.municipio_id ?? null
+  );
+  const [cursosDisponiveis, setCursosDisponiveis] = useState<Curso[]>([]);
+  const [loadingCursos, setLoadingCursos] = useState(false);
+  const [estabelecimentosDisponiveis, setEstabelecimentosDisponiveis] = useState<Estabelecimento[]>([]);
+  const [loadingEstabelecimentos, setLoadingEstabelecimentos] = useState(false);
   const [tipoAcao, setTipoAcao] = useState("");
   const [motivoDescredenciar, setMotivoDescredenciar] = useState("");
   const [ufSelecionada, setUfSelecionada] = useState(dadosMunicipioAnterior.uf || "");
@@ -59,11 +67,63 @@ export default function FormularioVagasMunicipio() {
     ? estadosRecurso.find((e) => e.uf === ufSelecionada)?.municipios || []
     : [];
 
-  const estabelecimentosDisponiveis: Estabelecimento[] = municipioSelecionado
-    ? municipiosDisponiveis.find((m) => m.nome === municipioSelecionado)?.estabelecimentos || []
-    : [];
+  // const estabelecimentosDisponiveis: Estabelecimento[] = municipioSelecionado
+  //   ? municipiosDisponiveis.find((m) => m.nome === municipioSelecionado)?.estabelecimentos || []
+  //   : [];
 
-  const cursosDisponiveis: Curso[] = estabelecimentoSelecionado?.cursos || [];
+  useEffect(() => {
+    if (!estabelecimentoSelecionado?.id) {
+      setCursosDisponiveis([]);
+      return;
+    }
+
+    async function buscarCursos() {
+      try {
+        setLoadingCursos(true);
+
+        const response = await fetch(
+          `http://localhost:3000/estabelecimentos/cursos?estabelecimento_id=${estabelecimentoSelecionado.id}`
+        );
+
+        const data = await response.json();
+
+        // Normaliza resposta
+        setCursosDisponiveis(
+          Array.isArray(data) ? data : data.rows ?? []
+        );
+      } catch (error) {
+        console.error("Erro ao buscar cursos", error);
+        setCursosDisponiveis([]);
+      } finally {
+        setLoadingCursos(false);
+      }
+    }
+
+    buscarCursos();
+  }, [estabelecimentoSelecionado?.id]);
+
+  useEffect(() => {
+    if (!municipioId) return;
+
+    async function buscarEstabelecimentos() {
+      try {
+        const response = await fetch(
+          `http://localhost:3000/estabelecimentos?municipio_id=${municipioId}`
+        );
+
+        const data = await response.json();
+
+        setEstabelecimentosDisponiveis(
+          Array.isArray(data) ? data : data.rows ?? []
+        );
+      } catch (error) {
+        console.error("Erro ao buscar estabelecimentos", error);
+        setEstabelecimentosDisponiveis([]);
+      }
+    }
+
+    buscarEstabelecimentos();
+  }, [municipioId]);
 
   // Carrega os cursos já selecionados para mudança de curso
   useEffect(() => {
@@ -244,16 +304,20 @@ export default function FormularioVagasMunicipio() {
                 fullWidth
                 value={estabelecimentoSelecionado?.cnes || ""}
                 onChange={(e) => {
-                  const est = estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
+                  const est =
+                    estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
+
                   setEstabelecimentoSelecionado(est);
                   setCursoSelecionado(null);
                   setQuantidade("");
                 }}
                 sx={{ mb: 2 }}
+                disabled={loadingEstabelecimentos}
               >
                 <MenuItem value="">
-                  <em>Selecione</em>
+                  <em>{loadingEstabelecimentos ? "Carregando..." : "Selecione"}</em>
                 </MenuItem>
+
                 {estabelecimentosDisponiveis.map((est) => (
                   <MenuItem key={est.cnes} value={est.cnes}>
                     {est.nome} (CNES: {est.cnes})
@@ -261,32 +325,38 @@ export default function FormularioVagasMunicipio() {
                 ))}
               </TextField>
 
+
               <TextField
                 select
                 label="Curso"
                 fullWidth
-                value={cursoSelecionado?.id || ""}
+                value={cursoSelecionado?.id?.toString() || ""}
                 onChange={(e) => {
-                  const c = cursosDisponiveis.find((c) =>
-                    c.id === e.target.value &&
-                    (tipoAcao === "aumentar vagas" || (c.vagasSolicitadas || 0) > 0 || tipoAcao === "adesao_edital")
+                  const curso = cursosDisponiveis.find(
+                    (c) => c.id.toString() === e.target.value // Converta para string também
                   ) || null;
-                  setCursoSelecionado(c);
-                  setQuantidade(c ? (tipoAcao === "diminuir vagas" ? c.vagasSolicitadas : c.vagas) : "");
+
+                  setCursoSelecionado(curso);
+
+                  if (curso) {
+                    setQuantidade(
+                      tipoAcao === "diminuir vagas"
+                        ? curso.vagasSolicitadas ?? 0
+                        : curso.vagas
+                    );
+                  }
                 }}
                 sx={{ mb: 2 }}
-                disabled={!estabelecimentoSelecionado}
+                disabled={!estabelecimentoSelecionado || loadingCursos}
               >
                 <MenuItem value="">
                   <em>Selecione</em>
                 </MenuItem>
-                {cursosDisponiveis
-                  .filter((c) => tipoAcao === "aumentar vagas" || (c.vagasSolicitadas || 0) > 0 || tipoAcao === "adesao_edital")
-                  .map((c) => (
-                    <MenuItem key={c.id} value={c.id}>
-                      {c.nome} ({tipoAcao === "diminuir vagas" ? `Vagas solicitadas: ${c.vagasSolicitadas}` : `Vagas: ${c.vagas}`})
-                    </MenuItem>
-                  ))}
+                {cursosDisponiveis.map((c) => (
+                  <MenuItem key={c.id} value={c.id.toString()}> {/* Converta aqui também */}
+                    {c.nome} ({c.vagas} vagas)
+                  </MenuItem>
+                ))}
               </TextField>
 
               <TextField

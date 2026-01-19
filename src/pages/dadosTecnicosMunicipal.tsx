@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
 import axios from "axios";
 
-// Schema de validação
+// Schema de validação (mantém apenas os campos visíveis)
 const schema = yup.object({
   uf: yup.string().required("UF é obrigatória"),
   nomeEstado: yup.string().required("Nome do Estado é obrigatório"),
@@ -29,12 +29,20 @@ type Estado = {
 type Municipio = {
   nome: string;
   ibge: string;
+  municipio_id: string; // Adicionado da API
+};
+
+type FormValues = {
+  uf: string;
+  nomeEstado: string;
+  municipio: string;
+  ibgeMunicipio: string;
 };
 
 export default function DadosMunicipio() {
   const navigate = useNavigate();
 
-  const [values, setValues] = useState({
+  const [formValues, setFormValues] = useState<FormValues>({
     uf: "",
     nomeEstado: "",
     municipio: "",
@@ -44,64 +52,94 @@ export default function DadosMunicipio() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [estados, setEstados] = useState<Estado[]>([]);
   const [municipios, setMunicipios] = useState<Municipio[]>([]);
+  const [municipioId, setMunicipioId] = useState<string>(""); // Estado separado para o ID
 
   // 🔹 Carrega estados ao montar a página
   useEffect(() => {
     async function carregarEstados() {
-      const response = await axios.get<Estado[]>(
-        "http://localhost:3000/localidades/estados"
-      );
-      setEstados(response.data);
+      try {
+        const response = await axios.get<Estado[]>(
+          "http://localhost:3000/localidades/estados"
+        );
+        setEstados(response.data);
+      } catch (error) {
+        console.error("Erro ao carregar estados:", error);
+      }
     }
 
     carregarEstados();
-    
   }, []);
-  
 
   // 🔹 Quando seleciona UF
   const handleUFChange = async (uf: string) => {
     const estadoSelecionado = estados.find((e) => e.uf === uf);
     if (!estadoSelecionado) return;
 
-    setValues({
+    // Limpa os valores
+    setFormValues({
       uf,
       nomeEstado: estadoSelecionado.nome,
       municipio: "",
       ibgeMunicipio: "",
     });
 
+    setMunicipioId(""); // Limpa o ID
     setErrors({});
     setMunicipios([]);
 
-    // Busca municípios da UF
-    const response = await axios.get<Municipio[]>(
-      `http://localhost:3000/localidades/municipios?uf=${uf}`
-    );
+    try {
+      // Busca municípios da UF
+      const response = await axios.get<Municipio[]>(
+        `http://localhost:3000/localidades/municipios?uf=${uf}`
+      );
 
-    setMunicipios(response.data);
+      setMunicipios(response.data);
+    } catch (error) {
+      console.error("Erro ao carregar municípios:", error);
+    }
   };
 
   // 🔹 Quando seleciona município
   const handleMunicipioChange = (municipioNome: string) => {
-    const mun = municipios.find((m) => m.nome === municipioNome);
+    const municipioSelecionado = municipios.find((m) => m.nome === municipioNome);
 
-    setValues((prev) => ({
-      ...prev,
-      municipio: municipioNome,
-      ibgeMunicipio: mun ? mun.ibge : "",
-    }));
+    if (municipioSelecionado) {
+      setFormValues((prev) => ({
+        ...prev,
+        municipio: municipioNome,
+        ibgeMunicipio: municipioSelecionado.ibge,
+      }));
 
-    setErrors((prev) => ({ ...prev, municipio: "", ibgeMunicipio: "" }));
+      // Armazena o municipio_id separadamente (vindo da API)
+      setMunicipioId(municipioSelecionado.municipio_id);
+
+      setErrors((prev) => ({ 
+        ...prev, 
+        municipio: "", 
+        ibgeMunicipio: "" 
+      }));
+    }
   };
 
   // 🔹 Submissão final
   const handleSubmit = async () => {
     try {
-      await schema.validate(values, { abortEarly: false });
+      // Valida apenas os campos do formulário
+      await schema.validate(formValues, { abortEarly: false });
 
-      sessionStorage.setItem("dadosMunicipio", JSON.stringify(values));
+      // Cria objeto com todos os dados incluindo o municipio_id
+      const dadosCompletos = {
+        ...formValues,
+        municipio_id: municipioId, // Adiciona o ID da API
+      };
 
+      // Armazena no sessionStorage
+      sessionStorage.setItem("dadosMunicipio", JSON.stringify(dadosCompletos));
+
+      // Para verificação (opcional)
+      console.log("Dados armazenados:", dadosCompletos);
+
+      // Navega para a próxima página
       navigate("/form-vagas");
     } catch (err: any) {
       const validationErrors: Record<string, string> = {};
@@ -143,7 +181,7 @@ export default function DadosMunicipio() {
             select
             label="UF do Estado"
             fullWidth
-            value={values.uf}
+            value={formValues.uf}
             error={!!errors.uf}
             helperText={errors.uf}
             onChange={(e) => handleUFChange(e.target.value)}
@@ -163,7 +201,7 @@ export default function DadosMunicipio() {
           <TextField
             label="Nome do Estado"
             fullWidth
-            value={values.nomeEstado}
+            value={formValues.nomeEstado}
             InputProps={{ readOnly: true }}
             sx={{ mb: 3 }}
           />
@@ -173,12 +211,12 @@ export default function DadosMunicipio() {
             select
             label="Município"
             fullWidth
-            value={values.municipio}
+            value={formValues.municipio}
             error={!!errors.municipio}
             helperText={errors.municipio}
             onChange={(e) => handleMunicipioChange(e.target.value)}
             sx={{ mb: 3 }}
-            disabled={!values.uf}
+            disabled={!formValues.uf}
           >
             <MenuItem value="">
               <em>Selecione</em>
@@ -194,12 +232,15 @@ export default function DadosMunicipio() {
           <TextField
             label="Código IBGE do Município"
             fullWidth
-            value={values.ibgeMunicipio}
+            value={formValues.ibgeMunicipio}
             InputProps={{ readOnly: true }}
             error={!!errors.ibgeMunicipio}
             helperText={errors.ibgeMunicipio}
             sx={{ mb: 3 }}
           />
+
+          {/* Campo oculto para debug (opcional) */}
+          <input type="hidden" value={municipioId} />
 
           <Divider sx={{ my: 3 }} />
 
@@ -208,9 +249,17 @@ export default function DadosMunicipio() {
             fullWidth
             size="large"
             onClick={handleSubmit}
+            disabled={!municipioId} // Opcional: desabilita se não tiver municipio_id
           >
             Continuar
           </Button>
+
+          {/* Para debug - mostrar o municipio_id (opcional) */}
+          {process.env.NODE_ENV === 'development' && (
+            <Typography variant="caption" color="text.secondary" mt={2} display="block">
+              ID do Município: {municipioId || "Não selecionado"}
+            </Typography>
+          )}
         </CardContent>
       </Card>
     </Box>
