@@ -153,17 +153,16 @@ export default function FormularioVagasMunicipio() {
     const ja = getJaAdicionadoParaCurso(String(curso.id), est.cnes);
 
     if (tipoAcao === "diminuir vagas") {
-      const saldoDiminuir = Number(curso.vagasSolicitadas ?? 0);
+      const saldoDiminuir = toNumber(curso.vagasSolicitadas);
       return Math.max(saldoDiminuir - ja, 0);
     }
 
     if (tipoAcao === "aumentar vagas") {
-      const saldoAumentar = Number(curso.vagasDisponiveisAumentar ?? 0);
+      const saldoAumentar = toNumber(curso.vagasDisponiveisAumentar);
       return Math.max(saldoAumentar - ja, 0);
     }
 
-    // outros casos (se quiser manter)
-    return Math.max(Number(curso.vagas ?? 0) - ja, 0);
+    return Math.max(toNumber(curso.vagas) - ja, 0);
   };
   const maxAtual = useMemo(() => {
     if (!cursoSelecionado || !estabelecimentoSelecionado) return undefined;
@@ -1021,18 +1020,18 @@ export default function FormularioVagasMunicipio() {
                   </MenuItem>
 
                   {cursosDisponiveis.map((c) => {
-                    const saldoDiminuir = Number(c.vagasSolicitadas ?? 0);
-                    const saldoAumentar = Number(c.vagasDisponiveisAumentar ?? 0);
+                    const max = estabelecimentoSelecionado
+                      ? getMaxPermitido(c, estabelecimentoSelecionado)
+                      : 0;
 
                     const desabilitado =
-                      (tipoAcao === "diminuir vagas" && saldoDiminuir <= 0) ||
-                      (tipoAcao === "aumentar vagas" && saldoAumentar <= 0);
+                      (tipoAcao === "diminuir vagas" || tipoAcao === "aumentar vagas") && max <= 0;
 
                     return (
                       <MenuItem key={c.id} value={c.id.toString()} disabled={desabilitado}>
                         {c.nome} (Teto: {c.vagas})
-                        {tipoAcao === "diminuir vagas" ? ` • Saldo diminuir: ${saldoDiminuir}` : ""}
-                        {tipoAcao === "aumentar vagas" ? ` • Saldo aumentar: ${saldoAumentar}` : ""}
+                        {tipoAcao === "diminuir vagas" ? ` • Saldo diminuir: ${toNumber(c.vagasSolicitadas)}` : ""}
+                        {tipoAcao === "aumentar vagas" ? ` • Saldo aumentar: ${toNumber(c.vagasDisponiveisAumentar)}` : ""}
                       </MenuItem>
                     );
                   })}
