@@ -12,6 +12,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
 import axios from "axios";
+const API_URL = import.meta.env.VITE_API_URL as string;
 
 // Schema de validação (mantém apenas os campos visíveis)
 const schema = yup.object({
@@ -59,7 +60,7 @@ export default function DadosMunicipio() {
     async function carregarEstados() {
       try {
         const response = await axios.get<Estado[]>(
-          `${import.meta.env.API_URL}/localidades/estados`
+          `${API_URL}/localidades/estados`
         );
         setEstados(response.data);
       } catch (error) {
@@ -90,7 +91,7 @@ export default function DadosMunicipio() {
     try {
       // Busca municípios da UF
       const response = await axios.get<Municipio[]>(
-        `${import.meta.env.API_URL}/localidades/municipios?uf=${uf}`
+        `http://localhost:3000/localidades/municipios?uf=${uf}`
       );
 
       setMunicipios(response.data);

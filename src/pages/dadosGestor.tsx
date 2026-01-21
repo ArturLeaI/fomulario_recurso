@@ -10,9 +10,11 @@ import {
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
 
+const API_URL = import.meta.env.VITE_API_URL as string;
+
 // ✅ sua API (pode usar fetch direto se preferir)
 async function postGestor(payload: { nome: string; cpf: string; email: string }) {
-  const res = await fetch(`${import.meta.env.API_URL}http://localhost:3000/gestores/validar`, {
+  const res = await fetch(`${API_URL}/gestores/validar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

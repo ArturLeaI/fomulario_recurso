@@ -99,7 +99,7 @@ export default function UploadArquivos() {
         });
     };
 
-    const API_BASE = import.meta.env.VITE_API_URL || "${API_BASE}";
+    const API_BASE = import.meta.env.VITE_API_URL || "API_BASE";
 
     const handleUpload = async () => {
         setErrorMsg("");

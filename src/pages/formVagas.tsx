@@ -25,6 +25,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import { postAcaoVagas } from "../services/api";
+const API_URL = import.meta.env.VITE_API_URL as string;
 
 // Tipos vindos da sua API de localidades
 type EstadoApi = { uf: string; nome: string };
@@ -243,7 +244,7 @@ export default function FormularioVagasMunicipio() {
     async function carregarEstados() {
       try {
         setLoadingEstados(true);
-        const resp = await fetch("${API_BASE}");
+        const resp = await fetch(`${API_URL}/localidades/estados`);
         const data = await resp.json();
         setEstadosApi(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -274,7 +275,7 @@ export default function FormularioVagasMunicipio() {
         setLoadingMunicipios(true);
 
         const resp = await fetch(
-          `${import.meta.env.API_URL}/localidades/municipios?uf=${encodeURIComponent(
+          `${API_URL}/localidades/municipios?uf=${encodeURIComponent(
             ufSelecionada
           )}&estabelecimento_status=${encodeURIComponent(estabelecimentoStatus)}`
         );
@@ -318,7 +319,7 @@ export default function FormularioVagasMunicipio() {
       try {
         setLoadingEstabelecimentos(true);
         const response = await fetch(
-          `${import.meta.env.API_URL}/estabelecimentos?municipio_id=${municipioId}&status_adesao=${encodeURIComponent(
+          `${API_URL}/estabelecimentos?municipio_id=${municipioId}&status_adesao=${encodeURIComponent(
             status
           )}`
         );
@@ -349,7 +350,7 @@ export default function FormularioVagasMunicipio() {
         setLoadingCursos(true);
 
         const response = await fetch(
-          `${import.meta.env.API_URL}/estabelecimentos/cursos?estabelecimento_id=${estabelecimentoSelecionado.id}`
+          `${API_URL}/estabelecimentos/cursos?estabelecimento_id=${estabelecimentoSelecionado.id}`
         );
         const data = await response.json();
 
@@ -391,7 +392,7 @@ export default function FormularioVagasMunicipio() {
     async function buscarTodosCursos() {
       try {
         const response = await fetch(
-          `${import.meta.env.API_URL}/estabelecimentos/todos-cursos`
+          `${API_URL}/estabelecimentos/todos-cursos`
         );
         const data = await response.json();
         const lista = Array.isArray(data) ? data : [];

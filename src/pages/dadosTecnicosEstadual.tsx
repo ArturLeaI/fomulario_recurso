@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
+const API_URL = import.meta.env.VITE_API_URL as string;
 
 // =====================
 // Tipagens
@@ -61,7 +62,7 @@ export default function DadosEstado() {
   useEffect(() => {
     async function carregarEstados() {
       try {
-        const res = await fetch(`${import.meta.env.API_URL}/localidades/estados`);
+        const res = await fetch(`${API_URL}/localidades/estados`);
         const data = await res.json();
         setEstados(data);
       } catch (error) {
@@ -94,7 +95,7 @@ export default function DadosEstado() {
 
     try {
       const res = await fetch(
-        `${import.meta.env.API_URL}/localidades/municipios/${uf}`
+        `${API_URL}/localidades/municipios/${uf}`
       );
       const data = await res.json();
       setMunicipios(data);
