@@ -849,7 +849,7 @@ export default function FormularioVagasMunicipio() {
             <MenuItem value="descredenciar vaga">Desistir da Adesão</MenuItem>
             <MenuItem value="aumentar vagas">Aumentar Número de Vagas</MenuItem>
             <MenuItem value="diminuir vagas">Diminuir Número de Vagas</MenuItem>
-            <MenuItem value="mudanca_curso">Mudança de Curso de Aprimoramento</MenuItem>
+            {/* <MenuItem value="mudanca_curso">Mudança de Curso de Aprimoramento</MenuItem> */}
             <MenuItem value="incluir_aprimoramento">Incluir Aprimoramento</MenuItem>
             <MenuItem value="adesao_edital">Adesão Por Perda de Prazo</MenuItem>
           </TextField>
