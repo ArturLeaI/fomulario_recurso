@@ -118,6 +118,7 @@ export default function FormularioVagasMunicipio() {
       vagasDisponiveis: number;
       estabelecimento: string;
       cnes: string;
+      tipoAcao: string; // ✅
     }[]
   >([]);
 
@@ -141,12 +142,22 @@ export default function FormularioVagasMunicipio() {
     return toNumber((curso as any).vagas_disponiveis);
   };
 
+  const getSaldoAumentar = (curso: any) => {
+    return toNumber(
+      curso.vagasDisponiveisAumentar ??
+      curso.vagas_disponiveis ??
+      curso.vagas_disponiveis_aumentar ??
+      curso.saldo_aumentar ??
+      curso.saldoAumentar
+    );
+  };
+
   // =========================
   // ✅ Helpers para "diminuir vagas"
   // =========================
   const getJaAdicionadoParaCurso = (cursoId: string, cnes: string) =>
     cursosAdicionados
-      .filter((x) => x.id === cursoId && x.cnes === cnes)
+      .filter((x) => x.id === cursoId && x.cnes === cnes && x.tipoAcao === tipoAcao)
       .reduce((sum, x) => sum + Number(x.quantidade || 0), 0);
 
   const getMaxPermitido = (curso: Curso, est: Estabelecimento) => {
@@ -158,7 +169,7 @@ export default function FormularioVagasMunicipio() {
     }
 
     if (tipoAcao === "aumentar vagas") {
-      const saldoAumentar = toNumber(curso.vagasDisponiveisAumentar);
+      const saldoAumentar = getSaldoAumentar(curso);
       return Math.max(saldoAumentar - ja, 0);
     }
 
@@ -306,12 +317,32 @@ export default function FormularioVagasMunicipio() {
     async function buscarCursos() {
       try {
         setLoadingCursos(true);
+
         const response = await fetch(
           `http://localhost:3000/estabelecimentos/cursos?estabelecimento_id=${estabelecimentoSelecionado.id}`
         );
         const data = await response.json();
-        console.log("RAW cursos response:", data);
-        setCursosDisponiveis(Array.isArray(data) ? data : data.rows ?? []);
+
+        const lista = Array.isArray(data) ? data : data.rows ?? [];
+
+        const normalizado: Curso[] = lista.map((c: any) => {
+          const vagas = toNumber(c.vagas);
+
+          return {
+            ...c,
+            vagas,
+            vagas_disponiveis: toNumber(c.vagas_disponiveis),
+            vagas_usadas: toNumber(c.vagas_usadas),
+
+            // ✅ pega de qualquer campo que o backend mande
+            vagasDisponiveisAumentar: getSaldoAumentar(c),
+
+            vagasSolicitadas: toNumber(c.vagasSolicitadas ?? c.vagas_solicitadas),
+          };
+        });
+
+        console.log("NORMALIZADO cursos:", normalizado);
+        setCursosDisponiveis(normalizado);
       } catch (error) {
         console.error("Erro ao buscar cursos", error);
         setCursosDisponiveis([]);
@@ -321,7 +352,9 @@ export default function FormularioVagasMunicipio() {
     }
 
     buscarCursos();
-  }, [estabelecimentoSelecionado?.id]);
+  }, [estabelecimentoSelecionado?.id, tipoAcao]);
+
+
 
   // =========================
   // Buscar "todos cursos" quando incluir_aprimoramento (mantive sua lógica)
@@ -354,6 +387,7 @@ export default function FormularioVagasMunicipio() {
 
     buscarTodosCursos();
   }, [tipoAcao, todosCursos.length]);
+
 
   // =========================
   // Carrega cursos originais quando mudança de curso
@@ -456,9 +490,10 @@ export default function FormularioVagasMunicipio() {
         id: cursoSelecionado.id,
         nome: cursoSelecionado.nome,
         quantidade: Number(quantidade),
-        vagasDisponiveis: vagasMax, // ✅ agora é o máximo permitido real
+        vagasDisponiveis: vagasMax,
         estabelecimento: estabelecimentoSelecionado.nome,
         cnes: estabelecimentoSelecionado.cnes,
+        tipoAcao, // ✅
       },
     ]);
 
@@ -537,7 +572,7 @@ export default function FormularioVagasMunicipio() {
       const resp = await postAcaoVagas(payload);
       sessionStorage.setItem("acaoVagaResposta", JSON.stringify(resp));
 
-      if (tipoAcao !== "descredenciar vaga" && cursosAdicionados.length > 0) {
+      if (estabelecimentoSelecionado?.id) {
         const doc = new jsPDF();
         doc.setFontSize(16);
         doc.text(`Vagas por Município`, 20, 20);
@@ -888,6 +923,7 @@ export default function FormularioVagasMunicipio() {
                       vagasDisponiveis: 20,
                       estabelecimento: estabelecimentoSelecionado!.nome,
                       cnes: estabelecimentoSelecionado!.cnes,
+                      tipoAcao, // ✅
                     }));
 
                   if (selecionados.length === 0) {
@@ -897,7 +933,9 @@ export default function FormularioVagasMunicipio() {
 
                   setCursosAdicionados((prev) => {
                     const novos = selecionados.filter(
-                      (novo) => !prev.some((p) => p.nome === novo.nome && p.cnes === novo.cnes)
+                      (novo) => !prev.some(
+                        (p) => p.nome === novo.nome && p.cnes === novo.cnes && p.tipoAcao === novo.tipoAcao
+                      )
                     );
                     return [...prev, ...novos];
                   });
@@ -1031,7 +1069,9 @@ export default function FormularioVagasMunicipio() {
                       <MenuItem key={c.id} value={c.id.toString()} disabled={desabilitado}>
                         {c.nome} (Teto: {c.vagas})
                         {tipoAcao === "diminuir vagas" ? ` • Saldo diminuir: ${toNumber(c.vagasSolicitadas)}` : ""}
-                        {tipoAcao === "aumentar vagas" ? ` • Saldo aumentar: ${toNumber(c.vagasDisponiveisAumentar)}` : ""}
+                        {tipoAcao === "aumentar vagas"
+                          ? ` • Saldo aumentar: ${getSaldoAumentar(c)}`
+                          : ""}
                       </MenuItem>
                     );
                   })}
