@@ -61,7 +61,7 @@ export default function DadosEstado() {
   useEffect(() => {
     async function carregarEstados() {
       try {
-        const res = await fetch("http://localhost:3000/localidades/estados");
+        const res = await fetch(`${import.meta.env.API_URL}/localidades/estados`);
         const data = await res.json();
         setEstados(data);
       } catch (error) {
@@ -94,7 +94,7 @@ export default function DadosEstado() {
 
     try {
       const res = await fetch(
-        `http://localhost:3000/localidades/municipios/${uf}`
+        `${import.meta.env.API_URL}/localidades/municipios/${uf}`
       );
       const data = await res.json();
       setMunicipios(data);

@@ -59,7 +59,7 @@ export default function DadosMunicipio() {
     async function carregarEstados() {
       try {
         const response = await axios.get<Estado[]>(
-          "http://localhost:3000/localidades/estados"
+          `${import.meta.env.API_URL}/localidades/estados`
         );
         setEstados(response.data);
       } catch (error) {
@@ -90,7 +90,7 @@ export default function DadosMunicipio() {
     try {
       // Busca municípios da UF
       const response = await axios.get<Municipio[]>(
-        `http://localhost:3000/localidades/municipios?uf=${uf}`
+        `${import.meta.env.API_URL}/localidades/municipios?uf=${uf}`
       );
 
       setMunicipios(response.data);

@@ -12,7 +12,7 @@ import * as yup from "yup";
 
 // ✅ sua API (pode usar fetch direto se preferir)
 async function postGestor(payload: { nome: string; cpf: string; email: string }) {
-  const res = await fetch("http://localhost:3000/gestores/validar", {
+  const res = await fetch(`${import.meta.env.API_URL}http://localhost:3000/gestores/validar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

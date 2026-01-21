@@ -4,6 +4,7 @@ import DadosGestor from "../pages/dadosGestor"
 import DadosEstadual from "../pages/dadosTecnicosEstadual";
 import DadosMunicipio from "../pages/dadosTecnicosMunicipal";
 import FormularioVagas from "../pages/formVagas";
+import UploadArquivos from "../pages/uploadArquivos";
 
 export default function AppRoutes() {
   return (
@@ -14,6 +15,7 @@ export default function AppRoutes() {
       <Route path="/dados-estadual" element={<DadosEstadual />} />
       <Route path="/dados-municipio" element={<DadosMunicipio />} />
       <Route path="/form-vagas" element={<FormularioVagas />} />
+      <Route path="/upload" element={<UploadArquivos />} />
 
       {/* fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
