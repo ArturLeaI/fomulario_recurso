@@ -36,6 +36,7 @@ const API_URL = import.meta.env.VITE_API_URL as string;
 // Tipos vindos da sua API de localidades
 type EstadoApi = { uf: string; nome: string };
 type MunicipioApi = { nome: string; ibge: string; municipio_id: string };
+type NivelGestao = "municipal" | "estadual";
 
 // Seus tipos
 type Curso = {
@@ -53,7 +54,9 @@ type Estabelecimento = {
   nome: string;
   cnes: string;
 
-  // ✅ opcionais (se vierem do backend, ótimo; se não, fica "")
+  // ✅ vem do backend (municipal|estadual|dobro)
+  nivel_gestao?: string;
+
   cnpj?: string;
   diretor_nome?: string;
 
@@ -289,12 +292,22 @@ export default function FormularioVagasMunicipio() {
     async function buscarEstabelecimentos() {
       const status = tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
 
+      const nivel = obterNivelGestao(); // 👈 vem da Home (sessionStorage)
+
+      const url =
+        `${API_URL}/estabelecimentos?municipio_id=${municipioId}` +
+        `&status_adesao=${encodeURIComponent(status)}` +
+        (nivel ? `&nivel_gestao=${encodeURIComponent(nivel.toUpperCase())}` : "");
+
+      console.log("URL estabelecimentos:", url); // 👈 debug recomendado
+
       try {
         setLoadingEstabelecimentos(true);
-        const response = await fetch(
-          `${API_URL}/estabelecimentos?municipio_id=${municipioId}&status_adesao=${encodeURIComponent(status)}`
-        );
+
+        const response = await fetch(url);
         const data = await response.json();
+
+        // ⛔ backend já filtra, não precisa mais filtrar aqui
         setEstabelecimentosDisponiveis(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Erro ao buscar estabelecimentos", error);
@@ -775,6 +788,70 @@ export default function FormularioVagasMunicipio() {
   };
 
   const localidadeOk = Boolean(tipoAcao && ufSelecionada && municipioSelecionado && municipioId);
+  function obterNivelGestao(): NivelGestao | null {
+    const v = sessionStorage.getItem("nivelGestao");
+    return v === "municipal" || v === "estadual" ? v : null;
+  }
+
+  function norm(s: unknown) {
+    return String(s ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, ""); // remove acentos
+  }
+
+  function estabelecimentoPassaNoFiltro(
+    est: any,
+    nivelSelecionado: NivelGestao | null
+  ) {
+    if (!nivelSelecionado) return true;
+
+    const ng = norm(est?.nivel_gestao);
+
+    // sem info → deixa passar
+    if (!ng) return true;
+
+    // DOBRO aparece sempre
+    if (
+      ng === "dobro" ||
+      ng === "ambos" ||
+      ng === "misto" ||
+      ng === "duplo" ||
+      (ng.includes("municipal") && ng.includes("estadual"))
+    ) {
+      return true;
+    }
+
+    // MUNICIPAL só vê municipal
+    if (nivelSelecionado === "municipal") {
+      return ng === "municipal";
+    }
+
+    // ESTADUAL vê estadual + municipal
+    if (nivelSelecionado === "estadual") {
+      return ng === "estadual" || ng === "municipal";
+    }
+
+    return false;
+  }
+  const nivel = obterNivelGestao();
+
+  const labelGestao =
+    nivel === "municipal"
+      ? `(Gestão Municipal)`
+      : nivel === "estadual"
+        ? `(Gestão Estadual)`
+        : "";
+
+  const textoPlaceholderEstabelecimento = loadingEstabelecimentos
+    ? "Carregando..."
+    : !municipioId
+      ? "Selecione o município primeiro"
+      : estabelecimentosDisponiveis.length === 0
+        ? "Nenhum estabelecimento para este nível de gestão"
+        : "Selecione";
+
 
   return (
     <Box
@@ -793,10 +870,13 @@ export default function FormularioVagasMunicipio() {
           <Typography variant="h5" fontWeight={600} textAlign="center" gutterBottom>
             Gestão de Vagas por Município
           </Typography>
+          <Typography fontSize={12} fontWeight={100} textAlign="center" gutterBottom>
+            {labelGestao}
+          </Typography>
 
           <Box display="flex" alignItems="center" justifyContent="center" gap={0.5} mb={3}>
             <Typography variant="body2" color="text.secondary" textAlign="center">
-              Conferir o resultado preliminar no  antes de selecionar a localidade e a ação que deseja realizar
+              Conferir o resultado preliminar no link ao lado antes de selecionar a localidade e a ação que deseja realizar
             </Typography>
 
             <IconButton
@@ -806,7 +886,7 @@ export default function FormularioVagasMunicipio() {
               rel="noopener noreferrer"
               aria-label="Abrir link de apoio"
               sx={{
-                padding: "10px",          
+                padding: "10px",
               }}
             >
               <LaunchIcon fontSize="small" />
@@ -910,8 +990,8 @@ export default function FormularioVagasMunicipio() {
                 disabled={loadingEstabelecimentos || !municipioId}
                 sx={{ mb: 2 }}
               >
-                <MenuItem value="">
-                  <em>{loadingEstabelecimentos ? "Carregando..." : "Selecione"}</em>
+                <MenuItem value="" disabled>
+                  <em>{textoPlaceholderEstabelecimento}</em>
                 </MenuItem>
 
                 {estabelecimentosDisponiveis.map((est) => (
@@ -956,8 +1036,8 @@ export default function FormularioVagasMunicipio() {
                     }}
                     disabled={loadingEstabelecimentos || !municipioId}
                   >
-                    <MenuItem value="">
-                      <em>{loadingEstabelecimentos ? "Carregando..." : "Selecione"}</em>
+                    <MenuItem value="" disabled>
+                      <em>{textoPlaceholderEstabelecimento}</em>
                     </MenuItem>
                     {estabelecimentosDisponiveis.map((est) => (
                       <MenuItem key={est.cnes} value={est.cnes}>
@@ -1154,8 +1234,8 @@ export default function FormularioVagasMunicipio() {
                   sx={{ mb: 2 }}
                   disabled={loadingEstabelecimentos || !municipioId}
                 >
-                  <MenuItem value="">
-                    <em>{loadingEstabelecimentos ? "Carregando..." : "Selecione"}</em>
+                  <MenuItem value="" disabled>
+                    <em>{textoPlaceholderEstabelecimento}</em>
                   </MenuItem>
 
                   {estabelecimentosDisponiveis.map((est) => (
