@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import DeleteIcon from "@mui/icons-material/Delete";
+import LaunchIcon from '@mui/icons-material/Launch';
 import {
   Box,
   Card,
@@ -793,10 +794,24 @@ export default function FormularioVagasMunicipio() {
             Gestão de Vagas por Município
           </Typography>
 
-          <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
-            Selecione a localidade e a ação que deseja realizar
-          </Typography>
+          <Box display="flex" alignItems="center" justifyContent="center" gap={0.5} mb={3}>
+            <Typography variant="body2" color="text.secondary" textAlign="center">
+              Conferir o resultado preliminar no  antes de selecionar a localidade e a ação que deseja realizar
+            </Typography>
 
+            <IconButton
+              size="small"
+              href="https://www.gov.br/saude/pt-br/acesso-a-informacao/participacao-social/chamamentos-publicos/2025/chamamento-publico-sgtes-ms-no-15-2025-projeto-mais-medicos-especialistas#:~:text=Resultado%20Preliminar%20%E2%80%93%20Vagas%20Deferidas%20no%20e%2DGestor"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Abrir link de apoio"
+              sx={{
+                padding: "10px",          
+              }}
+            >
+              <LaunchIcon fontSize="small" />
+            </IconButton>
+          </Box>
           <TextField
             select
             label="Tipo de ação"
@@ -826,7 +841,7 @@ export default function FormularioVagasMunicipio() {
             <MenuItem value="aumentar vagas">Aumentar Número de Vagas</MenuItem>
             <MenuItem value="diminuir vagas">Diminuir Número de Vagas</MenuItem>
             {/* <MenuItem value="mudanca_curso">Mudança de Curso de Aprimoramento</MenuItem> */}
-            <MenuItem value="incluir_aprimoramento">Incluir Outro Curso de Aprimoramento</MenuItem>
+            <MenuItem value="incluir_aprimoramento">Incluir Outro Aprimoramento</MenuItem>
             <MenuItem value="adesao_edital">Adesão Por Perda de Prazo</MenuItem>
           </TextField>
 
@@ -912,9 +927,9 @@ export default function FormularioVagasMunicipio() {
                   <FormControlLabel
                     value="desinteresse"
                     control={<Radio />}
-                    label="Desinteresse no curso de aprimoramento ofertado"
+                    label="Desinteresse no Aprimoramento Ofertado"
                   />
-                  <FormControlLabel value="falta_demanda" control={<Radio />} label="Falta de demanda para o curso" />
+                  <FormControlLabel value="falta_demanda" control={<Radio />} label="Falta de Demanda para o Aprimoramento" />
                   <FormControlLabel
                     value="capacidade_insuficiente"
                     control={<Radio />}
@@ -1073,14 +1088,14 @@ export default function FormularioVagasMunicipio() {
                   );
                 }}
               >
-                Adicionar cursos selecionados
+                Adicionar aprimoramentos selecionados
               </Button>
 
               {cursosAdicionados.length > 0 && (
                 <>
                   <Divider sx={{ my: 4 }} />
                   <Typography variant="subtitle1" fontWeight={600} mb={1}>
-                    Cursos Selecionados
+                    Aprimoramentos Selecionados
                   </Typography>
 
                   <List disablePadding>
@@ -1153,7 +1168,7 @@ export default function FormularioVagasMunicipio() {
                 {/* UI padrão (sem mudança de curso aqui pq você comentou no menu) */}
                 <TextField
                   select
-                  label="Curso"
+                  label="Aprimoramento"
                   fullWidth
                   value={cursoSelecionado?.id?.toString() || ""}
                   onChange={(e) => {
@@ -1168,7 +1183,7 @@ export default function FormularioVagasMunicipio() {
                     const max = getMaxPermitido(curso, estabelecimentoSelecionado);
 
                     if ((tipoAcao === "diminuir vagas" || tipoAcao === "aumentar vagas" || tipoAcao === "adesao_edital") && max <= 0) {
-                      alert("Esse curso não tem saldo disponível para essa ação.");
+                      alert("Esse aprimoramento não possui saldo disponível para essa ação.");
                       setCursoSelecionado(null);
                       setQuantidade("");
                       return;
@@ -1238,14 +1253,14 @@ export default function FormularioVagasMunicipio() {
                   disabled={!cursoSelecionado || !quantidade}
                   sx={{ mb: 3 }}
                 >
-                  Adicionar Curso
+                  Adicionar Aprimoramento
                 </Button>
 
                 {cursosAdicionados.length > 0 && (
                   <>
                     <Divider sx={{ mb: 2 }} />
                     <Typography variant="subtitle1" mb={1}>
-                      Cursos Selecionados:
+                      Aprimoramentos Selecionados:
                     </Typography>
                     <List>
                       {cursosAdicionados.map((c) => (
