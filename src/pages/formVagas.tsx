@@ -703,6 +703,7 @@ export default function FormularioVagasMunicipio() {
           })),
         });
 
+
         downloadFile(termoFile, "Termo_de_Adesao_Anexo_I.pdf");
 
         // --------- ANEXO II (somente perda de prazo / adesao_edital) ---------
@@ -752,6 +753,18 @@ export default function FormularioVagasMunicipio() {
           downloadFile(termoEstabFile, "Termo_Estabelecimentos_Anexo_II.pdf");
         }
       }
+
+      const cnesPrincipalUpload =
+        tipoAcao === "descredenciar vaga"
+          ? String(cnesDescredenciar || "").trim()
+          : String(
+            cursosAdicionados?.[0]?.cnes ||
+            cursosRemover?.[0]?.cnes ||
+            estabelecimentoSelecionado?.cnes ||
+            ""
+          ).trim();
+
+      sessionStorage.setItem("cnesPrincipalUpload", cnesPrincipalUpload);
 
       navigate("/upload");
     } catch (err: any) {

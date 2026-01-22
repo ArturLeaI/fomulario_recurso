@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
     Box,
     Card,
@@ -17,10 +17,11 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import { useNavigate } from "react-router-dom";
-const API_BASE = import.meta.env.API_URL;
+
+const API_BASE = import.meta.env.VITE_API_URL as string;
 
 type UploadFile = {
-    key: string;
+    key: "termo" | "recurso";
     label: string;
     file: File | null;
 };
@@ -29,56 +30,114 @@ function isPdf(file: File) {
     return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
+function isValidCnes(value: unknown) {
+    return /^\d{7}$/.test(String(value ?? "").trim());
+}
+
+/**
+ * ✅ CNES vem do sessionStorage (definido na página anterior)
+ * - se não existir, tenta fallback na acaoVagaResposta (legado)
+ */
+function getCnesForUpload(): string {
+    const direct = String(sessionStorage.getItem("cnesPrincipalUpload") || "").trim();
+    if (isValidCnes(direct)) return direct;
+
+    const raw = sessionStorage.getItem("acaoVagaResposta");
+    if (!raw) return "";
+
+    try {
+        const obj = JSON.parse(raw);
+
+        const directFromResp = String(obj?.cnes ?? "").trim();
+        if (isValidCnes(directFromResp)) return directFromResp;
+
+        const candidatesArrays: any[] = [
+            obj?.cursosAdicionar,
+            obj?.cursos_adicionar,
+            obj?.cursos,
+            obj?.cursosRemover,
+            obj?.cursos_remover,
+            obj?.payload?.cursos,
+            obj?.payload?.cursosAdicionar,
+            obj?.payload?.cursosRemover,
+            obj?.data?.cursos,
+        ].filter(Array.isArray);
+
+        for (const arr of candidatesArrays) {
+            const firstWithCnes = arr.find((x: any) => isValidCnes(x?.cnes));
+            if (firstWithCnes) return String(firstWithCnes.cnes).trim();
+        }
+
+        const nested =
+            String(obj?.data?.cnes ?? "").trim() ||
+            String(obj?.result?.cnes ?? "").trim() ||
+            String(obj?.res?.cnes ?? "").trim();
+
+        if (isValidCnes(nested)) return nested;
+
+        return "";
+    } catch {
+        return "";
+    }
+}
+
 export default function UploadArquivos() {
     const navigate = useNavigate();
 
-    // Ajuste os rótulos conforme seus PDFs
     const [files, setFiles] = useState<UploadFile[]>([
         { key: "termo", label: "Termo (PDF)", file: null },
         { key: "recurso", label: "Recurso (PDF) — se aplicável", file: null },
     ]);
 
+    // ✅ refs por tipo de documento (garante que cada botão abre o input certo)
+    const inputRefs = useRef<Record<UploadFile["key"], HTMLInputElement | null>>({
+        termo: null,
+        recurso: null,
+    });
+
     const [dragOver, setDragOver] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [errorMsg, setErrorMsg] = useState<string>("");
-    const [successMsg, setSuccessMsg] = useState<string>("");
+    const [errorMsg, setErrorMsg] = useState("");
+    const [successMsg, setSuccessMsg] = useState("");
 
-    const hasAtLeastOnePdf = useMemo(() => files.some((f) => f.file), [files]);
+    const hasAtLeastOnePdf = useMemo(() => files.some((f) => !!f.file), [files]);
 
-    const setFileByKey = (key: string, file: File | null) => {
+    const resetMsgs = () => {
+        setErrorMsg("");
+        setSuccessMsg("");
+    };
+
+    const setFileByKey = (key: UploadFile["key"], file: File | null) => {
         setFiles((prev) => prev.map((f) => (f.key === key ? { ...f, file } : f)));
     };
 
-    const handlePickFile = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-        setErrorMsg("");
-        setSuccessMsg("");
+    const handlePickFile =
+        (key: UploadFile["key"]) => (e: React.ChangeEvent<HTMLInputElement>) => {
+            resetMsgs();
 
-        const file = e.target.files?.[0] ?? null;
-        if (!file) return;
+            const file = e.target.files?.[0] ?? null;
+            if (!file) return;
 
-        if (!isPdf(file)) {
-            setErrorMsg("Envie apenas arquivos PDF.");
-            return;
-        }
+            if (!isPdf(file)) {
+                setErrorMsg("Envie apenas arquivos PDF.");
+                return;
+            }
 
-        setFileByKey(key, file);
+            setFileByKey(key, file);
 
-        // permite re-selecionar o mesmo arquivo
-        e.target.value = "";
-    };
+            // ✅ importante: permite escolher o mesmo arquivo de novo e disparar onChange
+            e.currentTarget.value = "";
+        };
 
-    const removeFile = (key: string) => {
-        setErrorMsg("");
-        setSuccessMsg("");
+    const removeFile = (key: UploadFile["key"]) => {
+        resetMsgs();
         setFileByKey(key, null);
     };
 
-    // Drag & drop: se cair 1 pdf, coloca no primeiro slot vazio
     const handleDrop = (ev: React.DragEvent) => {
         ev.preventDefault();
         setDragOver(false);
-        setErrorMsg("");
-        setSuccessMsg("");
+        resetMsgs();
 
         const dropped = Array.from(ev.dataTransfer.files || []);
         const pdfs = dropped.filter(isPdf);
@@ -99,52 +158,63 @@ export default function UploadArquivos() {
         });
     };
 
-    const API_BASE = import.meta.env.VITE_API_URL || "API_BASE";
+    const uploadOne = async (docType: UploadFile["key"], file: File, cnes: string) => {
+        const gestorId = sessionStorage.getItem("gestorId") || "";
+        const acaoVagaResposta = sessionStorage.getItem("acaoVagaResposta") || "";
+
+        const form = new FormData();
+        form.append("file", file);
+        form.append("cnes", cnes);
+        form.append("docType", docType);
+
+        if (gestorId) form.append("gestorId", gestorId);
+        if (acaoVagaResposta) form.append("acaoVagaResposta", acaoVagaResposta);
+
+        const resp = await fetch(`${API_BASE}/uploads`, {
+            method: "POST",
+            body: form,
+        });
+
+        if (!resp.ok) {
+            const txt = await resp.text().catch(() => "");
+            throw new Error(txt || `Falha ao enviar ${docType}`);
+        }
+
+        return (await resp.json()) as { filename: string };
+    };
 
     const handleUpload = async () => {
-        setErrorMsg("");
-        setSuccessMsg("");
+        resetMsgs();
 
         if (!hasAtLeastOnePdf) {
             setErrorMsg("Selecione pelo menos 1 PDF para enviar.");
             return;
         }
 
+        if (!API_BASE) {
+            setErrorMsg("VITE_API_URL não configurado no .env do front.");
+            return;
+        }
+
+        const cnes = getCnesForUpload();
+        if (!isValidCnes(cnes)) {
+            setErrorMsg("CNES não encontrado ou inválido. Volte e selecione o estabelecimento.");
+            return;
+        }
+
         try {
             setLoading(true);
 
-            const gestorId = sessionStorage.getItem("gestorId") || "";
-            const acaoVagaResposta = sessionStorage.getItem("acaoVagaResposta") || "";
-
-            const uploaded: Array<{ key: string; filename: string }> = [];
+            const uploaded: Array<{ key: UploadFile["key"]; filename: string }> = [];
 
             for (const item of files) {
                 if (!item.file) continue;
-
-                const form = new FormData();
-                form.append("file", item.file); // ✅ backend espera "file"
-                if (gestorId) form.append("gestorId", gestorId);
-                if (acaoVagaResposta) form.append("acaoVagaResposta", acaoVagaResposta);
-                form.append("docType", item.key); // "termo" | "recurso" (opcional, mas ajuda)
-
-                const resp = await fetch(`${API_BASE}/uploads`, {
-                    method: "POST",
-                    body: form,
-                });
-
-                if (!resp.ok) {
-                    const txt = await resp.text().catch(() => "");
-                    throw new Error(txt || `Falha ao enviar ${item.label}`);
-                }
-
-                const data = await resp.json();
+                const data = await uploadOne(item.key, item.file, cnes);
                 uploaded.push({ key: item.key, filename: data.filename });
             }
 
             sessionStorage.setItem("uploadedFiles", JSON.stringify(uploaded));
             setSuccessMsg("Arquivos enviados com sucesso!");
-
-            // ✅ se quiser ir pra próxima tela após upload
             navigate("/proximo-passo");
         } catch (err: any) {
             console.error(err);
@@ -173,7 +243,7 @@ export default function UploadArquivos() {
                     </Typography>
 
                     <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
-                        Envie o Termo e, se existir, o Recurso em PDF.
+                        Envie o Termo e, se necessário, o Recurso em PDF.
                     </Typography>
 
                     {errorMsg && (
@@ -187,7 +257,6 @@ export default function UploadArquivos() {
                         </Alert>
                     )}
 
-                    {/* Área drag/drop */}
                     <Box
                         onDragOver={(ev) => {
                             ev.preventDefault();
@@ -215,7 +284,6 @@ export default function UploadArquivos() {
 
                     <Divider sx={{ mb: 2 }} />
 
-                    {/* Slots */}
                     <List disablePadding sx={{ mb: 2 }}>
                         {files.map((item) => (
                             <ListItem
@@ -228,7 +296,7 @@ export default function UploadArquivos() {
                                 }}
                                 secondaryAction={
                                     item.file ? (
-                                        <IconButton edge="end" onClick={() => removeFile(item.key)}>
+                                        <IconButton edge="end" onClick={() => removeFile(item.key)} disabled={loading}>
                                             <DeleteIcon />
                                         </IconButton>
                                     ) : null
@@ -238,11 +306,9 @@ export default function UploadArquivos() {
                                     primary={<Typography fontWeight={700}>{item.label}</Typography>}
                                     secondary={
                                         item.file ? (
-                                            <>
-                                                <Typography variant="caption" display="block">
-                                                    {item.file.name} • {(item.file.size / 1024).toFixed(1)} KB
-                                                </Typography>
-                                            </>
+                                            <Typography variant="caption" display="block">
+                                                {item.file.name} • {(item.file.size / 1024).toFixed(1)} KB
+                                            </Typography>
                                         ) : (
                                             <Typography variant="caption" color="text.secondary">
                                                 Nenhum arquivo selecionado
@@ -251,15 +317,26 @@ export default function UploadArquivos() {
                                     }
                                 />
 
+                                {/* ✅ input escondido (um por item), com ref específico */}
+                                <input
+                                    ref={(el) => {
+                                        inputRefs.current[item.key] = el;
+                                    }}
+                                    type="file"
+                                    accept="application/pdf"
+                                    hidden
+                                    onChange={handlePickFile(item.key)}
+                                />
+
+                                {/* ✅ botão chama o input correto */}
                                 <Button
                                     variant={item.file ? "outlined" : "contained"}
-                                    component="label"
                                     startIcon={<UploadFileIcon />}
                                     sx={{ ml: 2, textTransform: "none", whiteSpace: "nowrap" }}
                                     disabled={loading}
+                                    onClick={() => inputRefs.current[item.key]?.click()}
                                 >
                                     {item.file ? "Trocar PDF" : "Selecionar PDF"}
-                                    <input hidden type="file" accept="application/pdf" onChange={handlePickFile(item.key)} />
                                 </Button>
                             </ListItem>
                         ))}
