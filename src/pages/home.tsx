@@ -48,13 +48,13 @@ export default function Home() {
     {
       nivel: "municipal",
       title: "Municipal",
-      subtitle: "Seleção de um único município",
+      subtitle: "",
       icon: <LocationCityIcon sx={{ fontSize: 40 }} />,
     },
     {
       nivel: "estadual",
       title: "Estadual",
-      subtitle: "Seleção de múltiplos municípios da UF",
+      subtitle: "",
       icon: <PublicIcon sx={{ fontSize: 40 }} />,
     },
   ];
@@ -102,20 +102,6 @@ export default function Home() {
               </Button>
             ))}
           </Box>
-
-          {/* Botão para anexar arquivo */}
-          <input
-            type="file"
-            id="file-upload"
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-            accept=".pdf,.doc,.docx"
-          />
-          <label htmlFor="file-upload">
-            <Button variant="contained" component="span" fullWidth>
-              {arquivo ? `Arquivo selecionado: ${arquivo.name}` : "Anexar Documento Assinado"}
-            </Button>
-          </label>
         </CardContent>
       </Card>
     </Box>

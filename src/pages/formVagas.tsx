@@ -23,8 +23,13 @@ import {
   Paper,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-import { jsPDF } from "jspdf";
 import { postAcaoVagas } from "../services/api";
+
+// ✅ ANEXO I (já existia)
+import { gerarTermoPdfFile } from "../utils/gerarTermoPdf";
+// ✅ ANEXO II (novo)
+import { gerarTermoEstabelecimentosPdfFile } from "../utils/gerarTermoEstabelecimento";
+
 const API_URL = import.meta.env.VITE_API_URL as string;
 
 // Tipos vindos da sua API de localidades
@@ -46,17 +51,12 @@ type Estabelecimento = {
   id: string | number;
   nome: string;
   cnes: string;
-  cursos: Curso[];
-};
 
-type CursoLinha = {
-  id: string;
-  nome: string;
-  quantidade: number;
-  cnes: string;
-  estabelecimento: string;
-  vagasDisponiveis?: number;
-  tipoAcao?: string;
+  // ✅ opcionais (se vierem do backend, ótimo; se não, fica "")
+  cnpj?: string;
+  diretor_nome?: string;
+
+  cursos: Curso[];
 };
 
 type CursoRemover = {
@@ -70,6 +70,16 @@ type CursoRemover = {
   saldoAumentar?: number;
 };
 
+type CursoAdicionado = {
+  id: string;
+  nome: string;
+  quantidade: number;
+  vagasDisponiveis: number;
+  estabelecimento: string;
+  cnes: string;
+  tipoAcao: string;
+};
+
 export default function FormularioVagasMunicipio() {
   const navigate = useNavigate();
 
@@ -80,51 +90,36 @@ export default function FormularioVagasMunicipio() {
   const [municipiosApi, setMunicipiosApi] = useState<MunicipioApi[]>([]);
   const [cnesDescredenciar, setCnesDescredenciar] = useState<string>("");
 
-  const dadosMunicipioAnterior = JSON.parse(
-    sessionStorage.getItem("dadosMunicipio") || "{}"
-  );
+  const dadosMunicipioAnterior = JSON.parse(sessionStorage.getItem("dadosMunicipio") || "{}");
 
   const [loadingEstados, setLoadingEstados] = useState(false);
   const [loadingMunicipios, setLoadingMunicipios] = useState(false);
 
-  const [ufSelecionada, setUfSelecionada] = useState<string>(
-    dadosMunicipioAnterior.uf || ""
-  );
-  const [nomeEstado, setNomeEstado] = useState<string>(
-    dadosMunicipioAnterior.nomeEstado || ""
-  );
+  const [ufSelecionada, setUfSelecionada] = useState<string>(dadosMunicipioAnterior.uf || "");
+  const [nomeEstado, setNomeEstado] = useState<string>(dadosMunicipioAnterior.nomeEstado || "");
   const [municipioSelecionado, setMunicipioSelecionado] = useState<string>(
     dadosMunicipioAnterior.municipio || ""
   );
-  const [ibgeMunicipio, setIbgeMunicipio] = useState<string>(
-    dadosMunicipioAnterior.ibgeMunicipio || ""
-  );
+  const [ibgeMunicipio, setIbgeMunicipio] = useState<string>(dadosMunicipioAnterior.ibgeMunicipio || "");
   const [municipioId, setMunicipioId] = useState<number | null>(
-    dadosMunicipioAnterior.municipio_id
-      ? Number(dadosMunicipioAnterior.municipio_id)
-      : null
+    dadosMunicipioAnterior.municipio_id ? Number(dadosMunicipioAnterior.municipio_id) : null
   );
 
   // =========================
   // Estado do formulário (ações)
   // =========================
   const [todosCursos, setTodosCursos] = useState<{ nome: string }[]>([]);
-  const [quantidadesCursos, setQuantidadesCursos] = useState<Record<string, number>>(
-    {}
-  );
+  const [quantidadesCursos, setQuantidadesCursos] = useState<Record<string, number>>({});
   const [cursosDisponiveis, setCursosDisponiveis] = useState<Curso[]>([]);
   const [loadingCursos, setLoadingCursos] = useState(false);
 
-  const [estabelecimentosDisponiveis, setEstabelecimentosDisponiveis] = useState<
-    Estabelecimento[]
-  >([]);
+  const [estabelecimentosDisponiveis, setEstabelecimentosDisponiveis] = useState<Estabelecimento[]>([]);
   const [loadingEstabelecimentos, setLoadingEstabelecimentos] = useState(false);
 
   const [tipoAcao, setTipoAcao] = useState("");
   const [motivoDescredenciar, setMotivoDescredenciar] = useState("");
 
-  const [estabelecimentoSelecionado, setEstabelecimentoSelecionado] =
-    useState<Estabelecimento | null>(null);
+  const [estabelecimentoSelecionado, setEstabelecimentoSelecionado] = useState<Estabelecimento | null>(null);
   const [cursoSelecionado, setCursoSelecionado] = useState<Curso | null>(null);
   const [quantidade, setQuantidade] = useState<number | "">("");
 
@@ -134,35 +129,10 @@ export default function FormularioVagasMunicipio() {
   );
 
   // ✅ Destino / adicionados (para todas ações que adicionam linhas)
-  const [cursosAdicionados, setCursosAdicionados] = useState<
-    {
-      id: string;
-      nome: string;
-      quantidade: number;
-      vagasDisponiveis: number;
-      estabelecimento: string;
-      cnes: string;
-      tipoAcao: string;
-    }[]
-  >([]);
+  const [cursosAdicionados, setCursosAdicionados] = useState<CursoAdicionado[]>([]);
 
   // ✅ Origem / remover (somente para mudança de curso)
   const [cursosRemover, setCursosRemover] = useState<CursoRemover[]>([]);
-
-  const totalRemoverMudanca = useMemo(() => {
-    if (tipoAcao !== "mudanca_curso") return 0;
-    return cursosRemover.reduce((sum, c) => sum + Number(c.quantidade || 0), 0);
-  }, [tipoAcao, cursosRemover]);
-
-  const totalAdicionarMudanca = useMemo(() => {
-    if (tipoAcao !== "mudanca_curso") return 0;
-    return cursosAdicionados.reduce((sum, c) => sum + Number(c.quantidade || 0), 0);
-  }, [tipoAcao, cursosAdicionados]);
-
-  const mudancaBalanceada = useMemo(() => {
-    if (tipoAcao !== "mudanca_curso") return true;
-    return totalRemoverMudanca === totalAdicionarMudanca;
-  }, [tipoAcao, totalRemoverMudanca, totalAdicionarMudanca]);
 
   // =========================
   // Helpers numéricos
@@ -172,15 +142,14 @@ export default function FormularioVagasMunicipio() {
     return Number.isFinite(n) ? n : 0;
   };
 
-  const getSaldoAumentar = (curso: any) => {
-    return toNumber(
+  const getSaldoAumentar = (curso: any) =>
+    toNumber(
       curso.vagasDisponiveisAumentar ??
       curso.vagas_disponiveis ??
       curso.vagas_disponiveis_aumentar ??
       curso.saldo_aumentar ??
       curso.saldoAumentar
     );
-  };
 
   // =========================
   // Helpers de limite (aumentar/diminuir/adesao)
@@ -210,12 +179,7 @@ export default function FormularioVagasMunicipio() {
     if (!cursoSelecionado || !estabelecimentoSelecionado) return undefined;
     return getMaxPermitido(cursoSelecionado, estabelecimentoSelecionado);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    cursoSelecionado?.id,
-    estabelecimentoSelecionado?.cnes,
-    tipoAcao,
-    cursosAdicionados,
-  ]);
+  }, [cursoSelecionado?.id, estabelecimentoSelecionado?.cnes, tipoAcao, cursosAdicionados]);
 
   // =========================
   // Reset dependências ao trocar localidade
@@ -238,6 +202,32 @@ export default function FormularioVagasMunicipio() {
   };
 
   // =========================
+  // Persistir dadosMunicipio
+  // =========================
+  const persistirDadosMunicipio = (payload: {
+    uf: string;
+    nomeEstado: string;
+    municipio: string;
+    ibgeMunicipio: string;
+    municipio_id: number | null;
+  }) => {
+    sessionStorage.setItem("dadosMunicipio", JSON.stringify(payload));
+  };
+
+  // =========================
+  // Download helper
+  // =========================
+  const downloadFile = (file: File, filename: string) => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    // pequeno delay para garantir que o navegador iniciou o download
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // =========================
   // Carregar estados
   // =========================
   useEffect(() => {
@@ -254,7 +244,6 @@ export default function FormularioVagasMunicipio() {
         setLoadingEstados(false);
       }
     }
-
     carregarEstados();
   }, []);
 
@@ -268,18 +257,15 @@ export default function FormularioVagasMunicipio() {
         return;
       }
 
-      const estabelecimentoStatus =
-        tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
+      const estabelecimentoStatus = tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
 
       try {
         setLoadingMunicipios(true);
-
         const resp = await fetch(
           `${API_URL}/localidades/municipios?uf=${encodeURIComponent(
             ufSelecionada
           )}&estabelecimento_status=${encodeURIComponent(estabelecimentoStatus)}`
         );
-
         const data = await resp.json();
         setMunicipiosApi(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -294,34 +280,18 @@ export default function FormularioVagasMunicipio() {
   }, [tipoAcao, ufSelecionada]);
 
   // =========================
-  // Persistir dadosMunicipio
-  // =========================
-  const persistirDadosMunicipio = (payload: {
-    uf: string;
-    nomeEstado: string;
-    municipio: string;
-    ibgeMunicipio: string;
-    municipio_id: number | null;
-  }) => {
-    sessionStorage.setItem("dadosMunicipio", JSON.stringify(payload));
-  };
-
-  // =========================
   // Buscar estabelecimentos quando municipioId muda
   // =========================
   useEffect(() => {
     if (!municipioId) return;
 
     async function buscarEstabelecimentos() {
-      const status =
-        tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
+      const status = tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
 
       try {
         setLoadingEstabelecimentos(true);
         const response = await fetch(
-          `${API_URL}/estabelecimentos?municipio_id=${municipioId}&status_adesao=${encodeURIComponent(
-            status
-          )}`
+          `${API_URL}/estabelecimentos?municipio_id=${municipioId}&status_adesao=${encodeURIComponent(status)}`
         );
         const data = await response.json();
         setEstabelecimentosDisponiveis(Array.isArray(data) ? data : []);
@@ -353,7 +323,6 @@ export default function FormularioVagasMunicipio() {
           `${API_URL}/estabelecimentos/cursos?estabelecimento_id=${estabelecimentoSelecionado.id}`
         );
         const data = await response.json();
-
         const lista = Array.isArray(data) ? data : data.rows ?? [];
 
         const normalizado: Curso[] = lista.map((c: any) => {
@@ -391,9 +360,7 @@ export default function FormularioVagasMunicipio() {
 
     async function buscarTodosCursos() {
       try {
-        const response = await fetch(
-          `${API_URL}/estabelecimentos/todos-cursos`
-        );
+        const response = await fetch(`${API_URL}/estabelecimentos/todos-cursos`);
         const data = await response.json();
         const lista = Array.isArray(data) ? data : [];
         setTodosCursos(lista);
@@ -432,7 +399,6 @@ export default function FormularioVagasMunicipio() {
       .map((c) => ({
         id: String(c.id),
         nome: c.nome,
-        // por padrão remove tudo que estava solicitado
         quantidade: toNumber(c.vagasSolicitadas),
         cnes: estabelecimentoSelecionado.cnes,
         estabelecimento: estabelecimentoSelecionado.nome,
@@ -494,7 +460,7 @@ export default function FormularioVagasMunicipio() {
   };
 
   // =========================
-  // Adicionar curso (aumentar/diminuir/adesao) — mantém sua regra de max
+  // Adicionar curso (aumentar/diminuir/adesao)
   // =========================
   const handleAdicionarCursoPadrao = () => {
     if (!cursoSelecionado || !quantidade || !estabelecimentoSelecionado) return;
@@ -543,61 +509,6 @@ export default function FormularioVagasMunicipio() {
   };
 
   // =========================
-  // ✅ Mudança de curso: adicionar destino (não é 1-para-1)
-  // =========================
-  const handleAdicionarCursoMudanca = () => {
-    if (!cursoSelecionado || !quantidade || !estabelecimentoSelecionado) return;
-
-    const jaNoDestino = cursosAdicionados.some(
-      (a) => a.id === String(cursoSelecionado.id) && a.cnes === estabelecimentoSelecionado.cnes
-    );
-    if (jaNoDestino) {
-      alert("Esse curso já foi adicionado como destino.");
-      return;
-    }
-
-    const maxReceber = getSaldoAumentar(cursoSelecionado);
-    if (maxReceber <= 0) {
-      alert("Esse curso não tem saldo disponível para receber vagas.");
-      return;
-    }
-
-    if (Number(quantidade) > maxReceber) {
-      alert(`Você só pode adicionar até ${maxReceber} vaga(s).`);
-      return;
-    }
-
-    setCursosAdicionados((prev) => [
-      ...prev,
-      {
-        id: String(cursoSelecionado.id),
-        nome: cursoSelecionado.nome,
-        quantidade: Number(quantidade),
-        vagasDisponiveis: maxReceber,
-        estabelecimento: estabelecimentoSelecionado.nome,
-        cnes: estabelecimentoSelecionado.cnes,
-        tipoAcao,
-      },
-    ]);
-
-    setCursoSelecionado(null);
-    setQuantidade("");
-  };
-
-  // =========================
-  // Remover linhas
-  // =========================
-  const removerDoDestino = (id: string, cnes: string) => {
-    setCursosAdicionados((prev) => prev.filter((c) => !(c.id === id && c.cnes === cnes)));
-  };
-
-  // ✅ “Excluir solicitados”: na prática é tirar da lista de REMOÇÃO
-  // (se ele não quiser excluir aquele solicitado)
-  const removerDaRemocao = (id: string, cnes: string) => {
-    setCursosRemover((prev) => prev.filter((c) => !(c.id === id && c.cnes === cnes)));
-  };
-
-  // =========================
   // Submit
   // =========================
   const handleSubmit = async () => {
@@ -619,12 +530,27 @@ export default function FormularioVagasMunicipio() {
         return;
       }
 
-      if (tipoAcao === "descredenciar vaga" && !cnesDescredenciar) {
-        alert("Selecione o estabelecimento (CNES).");
-        return;
+      // ✅ desistência: só valida campos da desistência
+      if (tipoAcao === "descredenciar vaga") {
+        if (!cnesDescredenciar) {
+          alert("Selecione o estabelecimento (CNES).");
+          return;
+        }
+        if (!motivoDescredenciar) {
+          alert("Selecione o motivo.");
+          return;
+        }
       }
 
-      // ✅ validação de cursos
+      // ✅ ações com curso: valida lista (não aplica na desistência)
+      if (tipoAcao !== "descredenciar vaga" && tipoAcao !== "mudanca_curso") {
+        if (cursosAdicionados.length === 0) {
+          alert("Selecione ao menos um curso com quantidade maior que zero.");
+          return;
+        }
+      }
+
+      // ✅ validação específica da mudança de curso (mantida)
       if (tipoAcao === "mudanca_curso") {
         const totalRemover = cursosRemover.reduce((s, c) => s + Number(c.quantidade || 0), 0);
         const totalAdicionar = cursosAdicionados.reduce((s, c) => s + Number(c.quantidade || 0), 0);
@@ -645,7 +571,7 @@ export default function FormularioVagasMunicipio() {
         }
       }
 
-      // ✅ payloads
+      // ✅ payloads (igual ao seu)
       const payload =
         tipoAcao === "descredenciar vaga"
           ? {
@@ -665,7 +591,6 @@ export default function FormularioVagasMunicipio() {
               municipio_id: municipioId,
               municipioSelecionado,
 
-              // novo formato (pra você usar depois)
               cursosRemover: cursosRemover.map((c) => ({
                 id: c.id,
                 nome: c.nome,
@@ -681,7 +606,6 @@ export default function FormularioVagasMunicipio() {
                 estabelecimento: c.estabelecimento,
               })),
 
-              // ✅ formato antigo (compat) — backend para de reclamar
               cursos: [
                 ...cursosRemover.map((c) => ({
                   id: c.id,
@@ -719,74 +643,113 @@ export default function FormularioVagasMunicipio() {
       const resp = await postAcaoVagas(payload);
       sessionStorage.setItem("acaoVagaResposta", JSON.stringify(resp));
 
-      // PDF (mantive seu comportamento: gera com cursosAdicionados)
-      if (estabelecimentoSelecionado?.id) {
-        const doc = new jsPDF();
-        doc.setFontSize(16);
-        doc.text(`Vagas por Município`, 20, 20);
-        doc.setFontSize(12);
-        doc.text(`Ação: ${tipoAcao}`, 20, 28);
-        doc.text(`UF: ${ufSelecionada}`, 20, 36);
-        doc.text(`Município: ${municipioSelecionado}`, 20, 44);
+      // ==============================
+      // ✅ GERAR PDF(s) — SOMENTE QUANDO FOR INCLUIR NOVO APRIMORAMENTO, GERAR 2
+      // - incluir_aprimoramento: Anexo I + Anexo II
+      // - outras ações com curso: Anexo I
+      // - descredenciar: não gera PDF
+      // ==============================
+      {
+        const nomeente = sessionStorage.getItem("nomeente") || municipioSelecionado;
+        const cnpj = sessionStorage.getItem("cnpj") || "";
+        const sede = sessionStorage.getItem("sede") || "";
+        const representacao = sessionStorage.getItem("representacao") || "";
 
-        let y = 60;
+        const hoje = new Date();
+        const dia = String(hoje.getDate());
+        const mes = hoje.toLocaleString("pt-BR", { month: "long" });
 
-        // ✅ em mudança de curso, pode ser útil imprimir os dois blocos
-        if (tipoAcao === "mudanca_curso") {
-          doc.text(`Remover (solicitados):`, 20, y);
-          y += 8;
-          cursosRemover.forEach((curso, index) => {
-            doc.text(
-              `${index + 1}. ${curso.estabelecimento} (CNES: ${curso.cnes}) | Curso: ${curso.nome} | Remover: ${curso.quantidade}`,
-              20,
-              y
-            );
-            y += 8;
-          });
+        // ✅ Lista que vai pro Anexo I depende da ação:
+        // - descredenciar: 1 linha "Descredenciar vaga" com CNES escolhido
+        // - mudanca_curso: usa cursosRemover
+        // - demais: usa cursosAdicionados
+        const listaParaTermo =
+          tipoAcao === "descredenciar vaga"
+            ? [
+              {
+                nome: `DESISTÊNCIA DA ADESÃO - ${motivoDescredenciar || "MOTIVO NÃO INFORMADO"}`,
+                cnes: cnesDescredenciar,
+                quantidade: 0,
+              },
+            ]
+            : tipoAcao === "mudanca_curso"
+              ? cursosRemover.map((c) => ({
+                nome: c.nome,
+                cnes: c.cnes,
+                quantidade: Number(c.quantidade || 0),
+              }))
+              : cursosAdicionados.map((c) => ({
+                nome: c.nome,
+                cnes: c.cnes,
+                quantidade: Number(c.quantidade || 0),
+              }));
 
-          y += 6;
-          doc.text(`Adicionar (destino):`, 20, y);
-          y += 8;
-          cursosAdicionados.forEach((curso, index) => {
-            doc.text(
-              `${index + 1}. ${curso.estabelecimento} (CNES: ${curso.cnes}) | Curso: ${curso.nome} | Adicionar: ${curso.quantidade}`,
-              20,
-              y
-            );
-            y += 8;
-          });
-        } else {
-          cursosAdicionados.forEach((curso, index) => {
-            doc.text(
-              `${index + 1}. Estabelecimento: ${curso.estabelecimento} (CNES: ${curso.cnes}) | Curso: ${curso.nome} | Quantidade: ${curso.quantidade} | Máx: ${curso.vagasDisponiveis}`,
-              20,
-              y
-            );
-            y += 10;
-          });
-        }
+        const totalVagas = listaParaTermo.reduce((acc, c: any) => acc + Number(c.quantidade || 0), 0);
 
-        doc.save(`Termo`);
+        // --------- ANEXO I (sempre) ---------
+        const termoFile = await gerarTermoPdfFile({
+          tipoAcao,
+          totalvagas: totalVagas,
+          nomeente,
+          cnpj,
+          sede,
+          representacao,
+          dia,
+          mes,
+          aprimoramentos: listaParaTermo.map((c: any) => ({
+            name: c.nome,
+            cnes: c.cnes,
+            vagas: Number(c.quantidade || 0),
+          })),
+        });
 
+        downloadFile(termoFile, "Termo_de_Adesao_Anexo_I.pdf");
+
+        // --------- ANEXO II (somente perda de prazo / adesao_edital) ---------
         if (tipoAcao === "adesao_edital") {
-          const docEdital = new jsPDF();
-          docEdital.setFontSize(16);
-          docEdital.text(`Termo`, 20, 20);
-          docEdital.setFontSize(12);
-          docEdital.text(`UF: ${ufSelecionada}`, 20, 28);
-          docEdital.text(`Município: ${municipioSelecionado}`, 20, 36);
+          const nomeente = sessionStorage.getItem("nomeente") || municipioSelecionado;
 
-          let y2 = 50;
-          cursosAdicionados.forEach((curso, index) => {
-            docEdital.text(
-              `${index + 1}. Estabelecimento: ${curso.estabelecimento} (CNES: ${curso.cnes}) | Curso: ${curso.nome} | Quantidade: ${curso.quantidade}`,
-              20,
-              y2
-            );
-            y2 += 10;
+          const hoje = new Date();
+          const dia = String(hoje.getDate());
+          const mes = hoje.toLocaleString("pt-BR", { month: "long" });
+
+          const estabByCnes = new Map<string, Estabelecimento>();
+          estabelecimentosDisponiveis.forEach((e) => estabByCnes.set(e.cnes, e));
+
+          const establist = cursosAdicionados.map((c) => ({
+            nomeestabelecimento: c.estabelecimento,
+            cnes: c.cnes,
+            nomecurso: c.nome,
+            vagas: Number(c.quantidade || 0),
+          }));
+
+          const seen = new Set<string>();
+          const assinaturalist = cursosAdicionados
+            .filter((c) => {
+              if (seen.has(c.cnes)) return false;
+              seen.add(c.cnes);
+              return true;
+            })
+            .map((c) => {
+              const est = estabByCnes.get(c.cnes) || null;
+              return {
+                nomeestabelecimento: c.estabelecimento,
+                cnes: c.cnes,
+                nomediretor: (est as any)?.diretor_nome ?? "",
+              };
+            });
+
+          const termoEstabFile = await gerarTermoEstabelecimentosPdfFile({
+            nomeente,
+            tipoAcao, // obrigatório
+            establist,
+            assinaturalist,
+            dia,
+            mes,
+            ano: String(hoje.getFullYear()),
           });
 
-          docEdital.save(`Recurso.pdf`);
+          downloadFile(termoEstabFile, "Termo_Estabelecimentos_Anexo_II.pdf");
         }
       }
 
@@ -850,7 +813,7 @@ export default function FormularioVagasMunicipio() {
             <MenuItem value="aumentar vagas">Aumentar Número de Vagas</MenuItem>
             <MenuItem value="diminuir vagas">Diminuir Número de Vagas</MenuItem>
             {/* <MenuItem value="mudanca_curso">Mudança de Curso de Aprimoramento</MenuItem> */}
-            <MenuItem value="incluir_aprimoramento">Incluir Aprimoramento</MenuItem>
+            <MenuItem value="incluir_aprimoramento">Incluir Outro Curso de Aprimoramento</MenuItem>
             <MenuItem value="adesao_edital">Adesão Por Perda de Prazo</MenuItem>
           </TextField>
 
@@ -877,12 +840,7 @@ export default function FormularioVagasMunicipio() {
             </Grid>
 
             <Grid size={{ xs: 12, md: 8 }}>
-              <TextField
-                label="Nome do Estado"
-                fullWidth
-                value={nomeEstado}
-                InputProps={{ readOnly: true }}
-              />
+              <TextField label="Nome do Estado" fullWidth value={nomeEstado} InputProps={{ readOnly: true }} />
             </Grid>
 
             <Grid size={{ xs: 12 }}>
@@ -943,11 +901,7 @@ export default function FormularioVagasMunicipio() {
                     control={<Radio />}
                     label="Desinteresse no curso de aprimoramento ofertado"
                   />
-                  <FormControlLabel
-                    value="falta_demanda"
-                    control={<Radio />}
-                    label="Falta de demanda para o curso de aprimoramento"
-                  />
+                  <FormControlLabel value="falta_demanda" control={<Radio />} label="Falta de demanda para o curso" />
                   <FormControlLabel
                     value="capacidade_insuficiente"
                     control={<Radio />}
@@ -958,7 +912,7 @@ export default function FormularioVagasMunicipio() {
             </>
           )}
 
-          {/* ========================= incluir_aprimoramento (mantido) ========================= */}
+          {/* ========================= incluir_aprimoramento ========================= */}
           {tipoAcao === "incluir_aprimoramento" && (
             <>
               <Grid container spacing={2}>
@@ -969,8 +923,7 @@ export default function FormularioVagasMunicipio() {
                     fullWidth
                     value={estabelecimentoSelecionado?.cnes || ""}
                     onChange={(e) => {
-                      const est =
-                        estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
+                      const est = estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
                       setEstabelecimentoSelecionado(est);
                     }}
                     disabled={loadingEstabelecimentos || !municipioId}
@@ -1089,11 +1042,6 @@ export default function FormularioVagasMunicipio() {
                       tipoAcao,
                     }));
 
-                  if (selecionados.length === 0) {
-                    alert("Selecione ao menos um curso com quantidade maior que zero.");
-                    return;
-                  }
-
                   setCursosAdicionados((prev) => {
                     const novos = selecionados.filter(
                       (novo) =>
@@ -1128,7 +1076,7 @@ export default function FormularioVagasMunicipio() {
                         key={`${c.nome}-${c.cnes}`}
                         divider
                         secondaryAction={
-                          <IconButton edge="end" onClick={() => removerDoDestino(c.id, c.cnes)}>
+                          <IconButton edge="end" onClick={() => setCursosAdicionados((prev) => prev.filter((x) => !(x.id === c.id && x.cnes === c.cnes)))}>
                             <DeleteIcon />
                           </IconButton>
                         }
@@ -1154,29 +1102,25 @@ export default function FormularioVagasMunicipio() {
             </>
           )}
 
-          {/* ========================= Ações que manipulam cursos ========================= */}
+          {/* ========================= Ações que manipulam cursos (UI padrão) ========================= */}
           {(tipoAcao === "aumentar vagas" ||
             tipoAcao === "diminuir vagas" ||
             tipoAcao === "mudanca_curso" ||
             tipoAcao === "adesao_edital") && (
               <>
-                {/* Estabelecimento */}
                 <TextField
                   select
                   label="Estabelecimento"
                   fullWidth
                   value={estabelecimentoSelecionado?.cnes || ""}
                   onChange={(e) => {
-                    const est =
-                      estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
+                    const est = estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
 
                     setEstabelecimentoSelecionado(est);
                     setCursoSelecionado(null);
                     setQuantidade("");
 
-                    // ✅ destino sempre limpa ao trocar estabelecimento
                     setCursosAdicionados([]);
-                    // ✅ remover/origem vai ser recalculado pelo effect (mudança_curso)
                     setCursosRemover([]);
                   }}
                   sx={{ mb: 2 }}
@@ -1193,329 +1137,120 @@ export default function FormularioVagasMunicipio() {
                   ))}
                 </TextField>
 
-                {/* ========================= UI Especial: Mudança de curso ========================= */}
-                {tipoAcao === "mudanca_curso" ? (
-                  <>
-                    <Divider sx={{ my: 2 }} />
+                {/* UI padrão (sem mudança de curso aqui pq você comentou no menu) */}
+                <TextField
+                  select
+                  label="Curso"
+                  fullWidth
+                  value={cursoSelecionado?.id?.toString() || ""}
+                  onChange={(e) => {
+                    const curso = cursosDisponiveis.find((c) => c.id.toString() === e.target.value) || null;
+                    setCursoSelecionado(curso);
 
-                    <Typography variant="subtitle1" fontWeight={700} mb={1}>
-                      Cursos solicitados (marcados para remover)
-                    </Typography>
+                    if (!curso || !estabelecimentoSelecionado) {
+                      setQuantidade("");
+                      return;
+                    }
 
-                    {cursosRemover.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">
-                        Nenhum curso solicitado (ou você removeu todos da lista de remoção).
-                      </Typography>
-                    ) : (
-                      <List>
-                        {cursosRemover.map((c) => (
-                          <ListItem
-                            key={`rem-${c.id}-${c.cnes}`}
-                            secondaryAction={
-                              <IconButton edge="end" onClick={() => removerDaRemocao(c.id, c.cnes)}>
-                                <DeleteIcon />
-                              </IconButton>
-                            }
-                          >
-                            <ListItemText
-                              primary={c.nome}
-                              secondary={`CNES: ${c.cnes} | Remover: ${c.quantidade} | Teto: ${c.teto ?? "-"}`}
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
-                    )}
+                    const max = getMaxPermitido(curso, estabelecimentoSelecionado);
 
-                    <Divider sx={{ my: 2 }} />
+                    if ((tipoAcao === "diminuir vagas" || tipoAcao === "aumentar vagas" || tipoAcao === "adesao_edital") && max <= 0) {
+                      alert("Esse curso não tem saldo disponível para essa ação.");
+                      setCursoSelecionado(null);
+                      setQuantidade("");
+                      return;
+                    }
 
-                    <Typography variant="subtitle1" fontWeight={700} mb={1}>
-                      Adicionar novo curso (destino) — pode adicionar quantos quiser
-                    </Typography>
+                    setQuantidade(1);
+                  }}
+                  sx={{ mb: 2 }}
+                  disabled={!estabelecimentoSelecionado || loadingCursos}
+                >
+                  <MenuItem value="">
+                    <em>Selecione</em>
+                  </MenuItem>
 
-                    {/* Curso destino */}
-                    <TextField
-                      select
-                      label="Novo curso"
-                      fullWidth
-                      value={cursoSelecionado?.id?.toString() || ""}
-                      onChange={(e) => {
-                        const curso =
-                          cursosDisponiveis.find((c) => c.id.toString() === e.target.value) || null;
+                  {cursosDisponiveis.map((c) => {
+                    const max = estabelecimentoSelecionado ? getMaxPermitido(c, estabelecimentoSelecionado) : 0;
 
-                        setCursoSelecionado(curso);
+                    const desabilitado =
+                      (tipoAcao === "diminuir vagas" || tipoAcao === "aumentar vagas" || tipoAcao === "adesao_edital") &&
+                      max <= 0;
 
-                        if (!curso) {
-                          setQuantidade("");
-                          return;
-                        }
-
-                        const maxReceber = getSaldoAumentar(curso);
-                        if (maxReceber <= 0) {
-                          alert("Esse curso não tem saldo disponível para receber vagas.");
-                          setCursoSelecionado(null);
-                          setQuantidade("");
-                          return;
-                        }
-
-                        setQuantidade(1);
-                      }}
-                      sx={{ mb: 2 }}
-                      disabled={!estabelecimentoSelecionado || loadingCursos}
-                    >
-                      <MenuItem value="">
-                        <em>Selecione</em>
+                    return (
+                      <MenuItem key={c.id} value={c.id.toString()} disabled={desabilitado}>
+                        {c.nome}
+                        {tipoAcao === "diminuir vagas" ? ` • Saldo diminuir: ${toNumber(c.vagasSolicitadas)}` : ""}
+                        {tipoAcao === "aumentar vagas" || tipoAcao === "adesao_edital"
+                          ? ` (Vagas Disponíveis: ${getSaldoAumentar(c)})`
+                          : ""}
                       </MenuItem>
+                    );
+                  })}
+                </TextField>
 
-                      {cursosDisponiveis
-                        .filter((c) => {
-                          const jaNoDestino = cursosAdicionados.some(
-                            (a) => a.id === String(c.id) && a.cnes === estabelecimentoSelecionado?.cnes
-                          );
-                          return !jaNoDestino;
-                        })
-                        .map((c) => {
-                          const maxReceber = getSaldoAumentar(c);
-                          return (
-                            <MenuItem key={c.id} value={c.id.toString()} disabled={maxReceber <= 0}>
-                              {c.nome} (Saldo receber: {maxReceber} | Teto: {toNumber(c.vagas)})
-                            </MenuItem>
-                          );
-                        })}
-                    </TextField>
+                <TextField
+                  label="Quantidade de vagas"
+                  type="number"
+                  fullWidth
+                  value={quantidade}
+                  onChange={(e) => {
+                    const valor = Number(e.target.value);
 
-                    {/* Quantidade destino */}
-                    <TextField
-                      label="Quantidade para adicionar no novo curso"
-                      type="number"
-                      fullWidth
-                      value={quantidade}
-                      onChange={(e) => {
-                        const valor = Number(e.target.value);
+                    if (!cursoSelecionado || !estabelecimentoSelecionado) {
+                      setQuantidade(Number.isFinite(valor) ? valor : "");
+                      return;
+                    }
 
-                        if (!cursoSelecionado) {
-                          setQuantidade(Number.isFinite(valor) ? valor : "");
-                          return;
-                        }
+                    const max = getMaxPermitido(cursoSelecionado, estabelecimentoSelecionado);
 
-                        const max = getSaldoAumentar(cursoSelecionado);
-                        if (!Number.isFinite(valor)) return setQuantidade("");
-                        setQuantidade(Math.min(Math.max(valor, 1), max));
-                      }}
-                      sx={{ mb: 2 }}
-                      disabled={!cursoSelecionado}
-                      inputProps={{
-                        min: 1,
-                        max: cursoSelecionado ? getSaldoAumentar(cursoSelecionado) : undefined,
-                      }}
-                      helperText={
-                        cursoSelecionado ? `Máximo permitido (saldo receber): ${getSaldoAumentar(cursoSelecionado)}` : ""
-                      }
-                    />
+                    if (!Number.isFinite(valor) || max <= 0) {
+                      setQuantidade("");
+                      return;
+                    }
 
-                    <Button
-                      variant="outlined"
-                      fullWidth
-                      onClick={handleAdicionarCursoMudanca}
-                      disabled={!cursoSelecionado || !quantidade}
-                      sx={{ mb: 3 }}
-                    >
-                      Adicionar novo curso
-                    </Button>
+                    const clamped = Math.min(Math.max(valor, 1), max);
+                    setQuantidade(clamped);
+                  }}
+                  sx={{ mb: 2 }}
+                  disabled={!cursoSelecionado}
+                  inputProps={{ min: 1, max: maxAtual }}
+                  helperText={cursoSelecionado && estabelecimentoSelecionado ? `Máximo permitido: ${maxAtual ?? 0}` : ""}
+                />
 
-                    {/* Listas consolidadas */}
-                    {(cursosRemover.length > 0 || cursosAdicionados.length > 0) && (
-                      <>
-                        <Divider sx={{ mb: 2 }} />
-                        <Typography variant="subtitle1" mb={1}>
-                          Resumo da Mudança de Curso
-                        </Typography>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={handleAdicionarCursoPadrao}
+                  disabled={!cursoSelecionado || !quantidade}
+                  sx={{ mb: 3 }}
+                >
+                  Adicionar Curso
+                </Button>
 
-                        {cursosRemover.length > 0 && (
-                          <>
-                            <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>
-                              Vai remover
-                            </Typography>
-                            <List>
-                              {cursosRemover.map((c) => (
-                                <ListItem
-                                  key={`sum-rem-${c.id}-${c.cnes}`}
-                                  secondaryAction={
-                                    <IconButton edge="end" onClick={() => removerDaRemocao(c.id, c.cnes)}>
-                                      <DeleteIcon />
-                                    </IconButton>
-                                  }
-                                >
-                                  <ListItemText
-                                    primary={`${c.nome} - ${c.estabelecimento}`}
-                                    secondary={`CNES: ${c.cnes} | Remover: ${c.quantidade}`}
-                                  />
-                                </ListItem>
-                              ))}
-                            </List>
-                          </>
-                        )}
-
-                        {cursosAdicionados.length > 0 && (
-                          <>
-                            <Typography variant="body2" fontWeight={700} sx={{ mt: 2, mb: 1 }}>
-                              Vai adicionar
-                            </Typography>
-                            <List>
-                              {cursosAdicionados.map((c) => (
-                                <ListItem
-                                  key={`sum-add-${c.id}-${c.cnes}`}
-                                  secondaryAction={
-                                    <IconButton edge="end" onClick={() => removerDoDestino(c.id, c.cnes)}>
-                                      <DeleteIcon />
-                                    </IconButton>
-                                  }
-                                >
-                                  <ListItemText
-                                    primary={`${c.nome} - ${c.estabelecimento}`}
-                                    secondary={`CNES: ${c.cnes} | Adicionar: ${c.quantidade} | Máx: ${c.vagasDisponiveis}`}
-                                  />
-                                </ListItem>
-                              ))}
-                            </List>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </>
-                ) : (
+                {cursosAdicionados.length > 0 && (
                   <>
-                    {/* ========================= UI padrão: aumentar/diminuir/adesao ========================= */}
-                    <TextField
-                      select
-                      label="Curso"
-                      fullWidth
-                      value={cursoSelecionado?.id?.toString() || ""}
-                      onChange={(e) => {
-                        const curso =
-                          cursosDisponiveis.find((c) => c.id.toString() === e.target.value) || null;
-
-                        setCursoSelecionado(curso);
-
-                        if (!curso || !estabelecimentoSelecionado) {
-                          setQuantidade("");
-                          return;
-                        }
-
-                        const max = getMaxPermitido(curso, estabelecimentoSelecionado);
-
-                        if (
-                          (tipoAcao === "diminuir vagas" ||
-                            tipoAcao === "aumentar vagas" ||
-                            tipoAcao === "adesao_edital") &&
-                          max <= 0
-                        ) {
-                          alert("Esse curso não tem saldo disponível para essa ação.");
-                          setCursoSelecionado(null);
-                          setQuantidade("");
-                          return;
-                        }
-
-                        setQuantidade(1);
-                      }}
-                      sx={{ mb: 2 }}
-                      disabled={!estabelecimentoSelecionado || loadingCursos}
-                    >
-                      <MenuItem value="">
-                        <em>Selecione</em>
-                      </MenuItem>
-
-                      {cursosDisponiveis.map((c) => {
-                        const max = estabelecimentoSelecionado ? getMaxPermitido(c, estabelecimentoSelecionado) : 0;
-
-                        const desabilitado =
-                          (tipoAcao === "diminuir vagas" ||
-                            tipoAcao === "aumentar vagas" ||
-                            tipoAcao === "adesao_edital") &&
-                          max <= 0;
-
-                        return (
-                          <MenuItem key={c.id} value={c.id.toString()} disabled={desabilitado}>
-                            {c.nome} (Teto: {c.vagas})
-                            {tipoAcao === "diminuir vagas" ? ` • Saldo diminuir: ${toNumber(c.vagasSolicitadas)}` : ""}
-                            {tipoAcao === "aumentar vagas" || tipoAcao === "adesao_edital"
-                              ? ` • Saldo disponível: ${getSaldoAumentar(c)}`
-                              : ""}
-                          </MenuItem>
-                        );
-                      })}
-                    </TextField>
-
-                    <TextField
-                      label="Quantidade de vagas"
-                      type="number"
-                      fullWidth
-                      value={quantidade}
-                      onChange={(e) => {
-                        const valor = Number(e.target.value);
-
-                        if (!cursoSelecionado || !estabelecimentoSelecionado) {
-                          setQuantidade(Number.isFinite(valor) ? valor : "");
-                          return;
-                        }
-
-                        const max = getMaxPermitido(cursoSelecionado, estabelecimentoSelecionado);
-
-                        if (!Number.isFinite(valor)) {
-                          setQuantidade("");
-                          return;
-                        }
-
-                        if (max <= 0) {
-                          setQuantidade("");
-                          return;
-                        }
-
-                        const clamped = Math.min(Math.max(valor, 1), max);
-                        setQuantidade(clamped);
-                      }}
-                      sx={{ mb: 2 }}
-                      disabled={!cursoSelecionado}
-                      inputProps={{ min: 1, max: maxAtual }}
-                      helperText={
-                        cursoSelecionado && estabelecimentoSelecionado ? `Máximo permitido: ${maxAtual ?? 0}` : ""
-                      }
-                    />
-
-                    <Button
-                      variant="outlined"
-                      fullWidth
-                      onClick={handleAdicionarCursoPadrao}
-                      disabled={!cursoSelecionado || !quantidade}
-                      sx={{ mb: 3 }}
-                    >
-                      Adicionar Curso
-                    </Button>
-
-                    {cursosAdicionados.length > 0 && (
-                      <>
-                        <Divider sx={{ mb: 2 }} />
-                        <Typography variant="subtitle1" mb={1}>
-                          Cursos Selecionados:
-                        </Typography>
-                        <List>
-                          {cursosAdicionados.map((c) => (
-                            <ListItem
-                              key={`${c.id}-${c.cnes}`}
-                              secondaryAction={
-                                <IconButton edge="end" onClick={() => removerDoDestino(c.id, c.cnes)}>
-                                  <DeleteIcon />
-                                </IconButton>
-                              }
-                            >
-                              <ListItemText
-                                primary={`${c.nome} - ${c.estabelecimento}`}
-                                secondary={`CNES: ${c.cnes} | Quantidade: ${c.quantidade} / Máx: ${c.vagasDisponiveis}`}
-                              />
-                            </ListItem>
-                          ))}
-                        </List>
-                      </>
-                    )}
+                    <Divider sx={{ mb: 2 }} />
+                    <Typography variant="subtitle1" mb={1}>
+                      Cursos Selecionados:
+                    </Typography>
+                    <List>
+                      {cursosAdicionados.map((c) => (
+                        <ListItem
+                          key={`${c.id}-${c.cnes}`}
+                          secondaryAction={
+                            <IconButton edge="end" onClick={() => setCursosAdicionados((prev) => prev.filter((x) => !(x.id === c.id && x.cnes === c.cnes)))}>
+                              <DeleteIcon />
+                            </IconButton>
+                          }
+                        >
+                          <ListItemText
+                            primary={`${c.nome} - ${c.estabelecimento}`}
+                            secondary={`CNES: ${c.cnes} | Quantidade: ${c.quantidade} / Máx: ${c.vagasDisponiveis}`}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
                   </>
                 )}
               </>
@@ -1530,10 +1265,7 @@ export default function FormularioVagasMunicipio() {
               !tipoAcao ||
               !localidadeOk ||
               (tipoAcao === "descredenciar vaga" && (!motivoDescredenciar || !cnesDescredenciar)) ||
-              (tipoAcao === "mudanca_curso" && cursosAdicionados.length === 0 && cursosRemover.length === 0) ||
-              (tipoAcao !== "descredenciar vaga" &&
-                tipoAcao !== "mudanca_curso" &&
-                cursosAdicionados.length === 0)
+              (tipoAcao !== "descredenciar vaga" && tipoAcao !== "mudanca_curso" && cursosAdicionados.length === 0)
             }
           >
             Finalizar Solicitacao
