@@ -290,24 +290,23 @@ export default function FormularioVagasMunicipio() {
     if (!municipioId) return;
 
     async function buscarEstabelecimentos() {
-      const status = tipoAcao === "incluir_aprimoramento" ? "NAO_ADERIDO" : "ADERIDO";
+      const nivel = obterNivelGestao(); // municipal | estadual | null
 
-      const nivel = obterNivelGestao(); // 👈 vem da Home (sessionStorage)
+      // ✅ Só filtra por status nas outras abas
+      const deveFiltrarStatus = tipoAcao !== "incluir_aprimoramento";
+      const status = "ADERIDO";
 
       const url =
         `${API_URL}/estabelecimentos?municipio_id=${municipioId}` +
-        `&status_adesao=${encodeURIComponent(status)}` +
+        (deveFiltrarStatus ? `&status_adesao=${encodeURIComponent(status)}` : "") +
         (nivel ? `&nivel_gestao=${encodeURIComponent(nivel.toUpperCase())}` : "");
 
-      console.log("URL estabelecimentos:", url); // 👈 debug recomendado
+      console.log("URL estabelecimentos:", url);
 
       try {
         setLoadingEstabelecimentos(true);
-
         const response = await fetch(url);
         const data = await response.json();
-
-        // ⛔ backend já filtra, não precisa mais filtrar aqui
         setEstabelecimentosDisponiveis(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Erro ao buscar estabelecimentos", error);
@@ -801,10 +800,7 @@ export default function FormularioVagasMunicipio() {
       .replace(/[\u0300-\u036f]/g, ""); // remove acentos
   }
 
-  function estabelecimentoPassaNoFiltro(
-    est: any,
-    nivelSelecionado: NivelGestao | null
-  ) {
+  function estabelecimentoPassaNoFiltro(est: any, nivelSelecionado: NivelGestao | null) {
     if (!nivelSelecionado) return true;
 
     const ng = norm(est?.nivel_gestao);
@@ -812,28 +808,28 @@ export default function FormularioVagasMunicipio() {
     // sem info → deixa passar
     if (!ng) return true;
 
-    // DOBRO aparece sempre
-    if (
+    // "DUPLA" (ou sinônimos) aparece nos dois filtros
+    const isDupla =
+      ng === "dupla" ||
       ng === "dobro" ||
       ng === "ambos" ||
       ng === "misto" ||
       ng === "duplo" ||
-      (ng.includes("municipal") && ng.includes("estadual"))
-    ) {
-      return true;
-    }
+      (ng.includes("municipal") && ng.includes("estadual"));
 
-    // MUNICIPAL só vê municipal
+    if (isDupla) return true;
+
+    // MUNICIPAL: municipal (+ dupla já foi tratada acima)
     if (nivelSelecionado === "municipal") {
       return ng === "municipal";
     }
 
-    // ESTADUAL vê estadual + municipal
+    // ESTADUAL: estadual (+ dupla já foi tratada acima)
     if (nivelSelecionado === "estadual") {
-      return ng === "estadual" || ng === "municipal";
+      return ng === "estadual";
     }
 
-    return false;
+    return true;
   }
   const nivel = obterNivelGestao();
 

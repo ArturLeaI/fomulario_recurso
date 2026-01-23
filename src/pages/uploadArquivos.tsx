@@ -85,8 +85,8 @@ export default function UploadArquivos() {
     const navigate = useNavigate();
 
     const [files, setFiles] = useState<UploadFile[]>([
-        { key: "termo", label: "Termo (PDF)", file: null },
-        { key: "recurso", label: "Recurso (PDF) — se aplicável", file: null },
+        { key: "termo", label: "Termo de Adesão (Pdf)", file: null },
+        { key: "recurso", label: "Termo de Estabelecimento (Pdf) — se aplicável", file: null },
     ]);
 
     // ✅ refs por tipo de documento (garante que cada botão abre o input certo)
@@ -243,7 +243,7 @@ export default function UploadArquivos() {
                     </Typography>
 
                     <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
-                        Envie o Termo e, se necessário, o Recurso em PDF.
+                        Envie o Termo de Adesão e, se necessário, o Termo de Estabelecimento.
                     </Typography>
 
                     {errorMsg && (
