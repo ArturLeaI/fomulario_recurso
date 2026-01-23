@@ -14,6 +14,10 @@ type TermoData = {
   sede: string;
   representacao: string;
 
+  // ✅ NOVO: dados do gestor no PDF
+  gestorNome: string;
+  gestorCpf: string;
+
   dia: string;
   mes: string;
 };
@@ -86,6 +90,16 @@ function labelTipoAcao(tipo: string) {
   return v;
 }
 
+function onlyDigits(v: unknown) {
+  return String(v ?? "").replace(/\D/g, "");
+}
+
+function formatCpf11(cpfRaw: unknown) {
+  const d = onlyDigits(cpfRaw).slice(0, 11);
+  if (d.length !== 11) return String(cpfRaw ?? "").trim();
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9, 11)}`;
+}
+
 // =====================
 // PDF
 // =====================
@@ -118,7 +132,6 @@ export async function gerarTermoPdfFile(data: TermoData): Promise<File> {
   const headerAfterImageY = yImg + BRASAO_SIZE_MM + BRASAO_GAP_AFTER;
 
   try {
-    // ⚠️ seu base64 é JPEG ("/9j/..."), então o formato deve ser JPEG
     doc.addImage(BRASAO_DATA_URL, "JPEG", xImg, yImg, BRASAO_SIZE_MM, BRASAO_SIZE_MM);
   } catch (e) {
     console.warn("Não foi possível adicionar o brasão.", e);
@@ -175,7 +188,6 @@ export async function gerarTermoPdfFile(data: TermoData): Promise<File> {
   // =====================
   autoTable(doc, {
     startY: y,
-
     head: [
       [
         {
@@ -186,7 +198,6 @@ export async function gerarTermoPdfFile(data: TermoData): Promise<File> {
       ],
       ["Aprimoramento", "CNES", "Nº de vagas solicitadas"],
     ],
-
     body: data.aprimoramentos.map((a) => [a.name, a.cnes, String(a.vagas)]),
 
     margin: {
@@ -383,8 +394,8 @@ II - unilateralmente, mediante aviso prévio de 30 (trinta) dias.`
   // =====================
   // Rodapé / assinaturas (anti-corte)
   // =====================
-  // precisa caber: data + 28 + 7 + 7 (aprox)
-  const neededFooter = 45;
+  // precisa caber: data + 28 + bloco do gestor (~18) + etc
+  const neededFooter = 58;
   y = ensureSpace(doc, y, neededFooter, topY, bottomY);
 
   setNormal();
@@ -394,11 +405,19 @@ II - unilateralmente, mediante aviso prévio de 30 (trinta) dias.`
   const leftX = MARGIN_LEFT;
   const rightX = pageWidth / 2 + 10;
 
-  doc.text("_______________________________________", leftX, y);
+
   doc.text("______________________________________", rightX, y);
 
-  doc.setFont("helvetica", "bold");
+  // ✅ nome/cpf do gestor abaixo da linha (lado direito)
+  const gestorNome = String(data.gestorNome || "").trim();
+  const gestorCpf = formatCpf11(data.gestorCpf);
+
+  setBold();
   doc.text("GESTOR LOCAL", rightX, y + 7);
+
+  setNormal();
+  if (gestorNome) doc.text(gestorNome, rightX, y + 13);
+  if (gestorCpf) doc.text(`CPF: ${gestorCpf}`, rightX, y + 18);
 
   const blob = doc.output("blob");
   return new File([blob], "Termo_de_Adesao.pdf", { type: "application/pdf" });

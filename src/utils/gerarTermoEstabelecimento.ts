@@ -23,6 +23,10 @@ type TermoEstabelecimentosData = {
   establist: EstabRow[];
   assinaturalist: AssinaturaRow[];
 
+  // ✅ NOVO: dados do gestor no PDF
+  gestorNome: string;
+  gestorCpf: string;
+
   dia: string;
   mes: string;
   ano?: string; // opcional (default: "2026")
@@ -107,6 +111,18 @@ function labelTipoAcao(tipo: string) {
   if (v === "DIMINUIR_VAGAS") return "Diminuir vagas";
   if (v === "MUDANCA_CURSO") return "Mudança de curso";
   return v;
+}
+
+// =====================
+// Helpers CPF
+// =====================
+function onlyDigits(v: unknown) {
+  return String(v ?? "").replace(/\D/g, "");
+}
+function formatCpf11(cpfRaw: unknown) {
+  const d = onlyDigits(cpfRaw).slice(0, 11);
+  if (d.length !== 11) return String(cpfRaw ?? "").trim();
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9, 11)}`;
 }
 
 // =====================
@@ -246,10 +262,6 @@ export async function gerarTermoEstabelecimentosPdfFile(
       2: { cellWidth: maxWidth * 0.38 },
       3: { cellWidth: maxWidth * 0.14, halign: "center" },
     },
-    didDrawPage: () => {
-      // garante que o texto após a tabela respeite o topY
-      // (autotable já usa margin.top, mas mantemos consistência)
-    },
   });
 
   // @ts-expect-error lastAutoTable exists at runtime
@@ -364,7 +376,6 @@ III - por recomendação da SGTES/MS, quando constatado descumprimento das diret
   // =====================
   // Quadro de assinaturas
   // =====================
-  // estimativa: cabeçalho + ao menos 2 linhas + respiro
   y = ensureSpace(doc, y, 45, topY, bottomY);
 
   setBold();
@@ -411,9 +422,9 @@ III - por recomendação da SGTES/MS, quando constatado descumprimento das diret
   y = doc.lastAutoTable.finalY + 14;
 
   // =====================
-  // Assinatura do Gestor Local (anti-corte)
+  // Assinatura do Gestor Local (anti-corte) + dados
   // =====================
-  y = ensureSpace(doc, y, 40, topY, bottomY);
+  y = ensureSpace(doc, y, 48, topY, bottomY);
 
   setNormal();
   const ano = data.ano ?? "2026";
@@ -429,13 +440,27 @@ III - por recomendação da SGTES/MS, quando constatado descumprimento das diret
   y += 10;
 
   // se a linha de assinatura não couber, pula página
-  y = ensureSpace(doc, y, 18, topY, bottomY);
+  y = ensureSpace(doc, y, 28, topY, bottomY);
 
   doc.text("_____________________________________", MARGIN_LEFT, y);
   y += 7;
 
   setBold();
   doc.text("GESTOR LOCAL", MARGIN_LEFT, y);
+  y += 6;
+
+  setNormal();
+  const gestorNome = String(data.gestorNome || "").trim();
+  const gestorCpfFmt = formatCpf11(data.gestorCpf);
+
+  if (gestorNome) {
+    doc.text(gestorNome, MARGIN_LEFT, y);
+    y += 6;
+  }
+  if (gestorCpfFmt) {
+    doc.text(`CPF: ${gestorCpfFmt}`, MARGIN_LEFT, y);
+    y += 6;
+  }
 
   const blob = doc.output("blob");
   return new File([blob], "Termo_Estabelecimentos_Anexo_II.pdf", {

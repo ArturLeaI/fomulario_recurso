@@ -1,465 +1,560 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-    Box,
-    Card,
-    CardContent,
-    Typography,
-    TextField,
-    MenuItem,
-    Button,
-    Divider,
-    List,
-    ListItem,
-    ListItemText,
-    IconButton,
-    LinearProgress,
-    Alert,
-    Chip,
-    Stack,
-    Grid,
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  TextField,
+  MenuItem,
+  Button,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  LinearProgress,
+  Alert,
+  Chip,
+  Stack,
+  Grid,
+  Tooltip,
+  Switch,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
 type EstadoApi = { uf: string; nome: string };
 type MunicipioApi = { nome: string; ibge: string; municipio_id: string };
-type Estabelecimento = { id: string | number; nome: string; cnes: string };
+type Estabelecimento = { id: string | number; nome: string; cnes: string | number };
 
 type PdfItem = {
-    filename: string;
-    cnes: string | null;
-    sizeKB: number;
-    createdAt: string | Date;
-    url: string; // vem do backend: /uploads/<arquivo>
+  filename: string;
+  cnes: string | number | null;
+  sizeKB: number;
+  createdAt: string | Date;
+  url: string; // vem do backend: /uploads/<arquivo>
 };
 
 type PdfListResponse =
-    | { ok: true; total: number; files: PdfItem[] }
-    | { ok: false; message: string };
+  | { ok: true; total: number; files: PdfItem[] }
+  | { ok: false; message: string };
 
-function isValidCnes(v: unknown) {
-    return /^\d{7}$/.test(String(v ?? "").trim());
+// =========================
+// Utils
+// =========================
+function normalizeCnes(v: unknown) {
+  const onlyDigits = String(v ?? "").replace(/\D+/g, "");
+  if (!onlyDigits) return "";
+  return onlyDigits.padStart(7, "0");
 }
 
-// tenta transformar o createdAt em Date com segurança
+function isValidCnes(v: unknown) {
+  return /^\d{7}$/.test(normalizeCnes(v));
+}
+
 function toDate(value: any) {
-    const d = value instanceof Date ? value : new Date(value);
-    return Number.isFinite(d.getTime()) ? d : null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
 }
 
 function formatPtBrDate(value: any) {
-    const d = toDate(value);
-    if (!d) return "-";
-    return d.toLocaleString("pt-BR");
+  const d = toDate(value);
+  if (!d) return "-";
+  return d.toLocaleString("pt-BR");
 }
 
-// tenta tirar o nome base (antes do __CNES-...__)
 function friendlyNameFromFilename(filename: string) {
-    const parts = String(filename).split("__CNES-");
-    const base = parts[0] || filename;
-    return base.replace(/_/g, " ").trim();
+  const parts = String(filename).split("__CNES-");
+  const base = parts[0] || filename;
+  return base.replace(/_/g, " ").trim();
+}
+
+function joinUrl(base: string, pathname: string) {
+  const b = String(base || "").replace(/\/+$/, "");
+  const p = String(pathname || "").replace(/^\/+/, "");
+  return `${b}/${p}`;
+}
+
+// ===== Assinado (localStorage) =====
+type AssinadoMap = Record<string, boolean>;
+const ASSINADOS_STORAGE_KEY = "pdf_assinados_map_v1";
+
+function loadAssinados(): AssinadoMap {
+  try {
+    const raw = localStorage.getItem(ASSINADOS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as AssinadoMap) : {};
+  } catch {
+    return {};
+  }
 }
 
 export default function ListarPdfs() {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
 
-    const [estados, setEstados] = useState<EstadoApi[]>([]);
-    const [municipios, setMunicipios] = useState<MunicipioApi[]>([]);
-    const [estabelecimentos, setEstabelecimentos] = useState<Estabelecimento[]>([]);
+  const [estados, setEstados] = useState<EstadoApi[]>([]);
+  const [municipios, setMunicipios] = useState<MunicipioApi[]>([]);
+  const [estabelecimentos, setEstabelecimentos] = useState<Estabelecimento[]>([]);
 
-    const [uf, setUf] = useState("");
-    const [municipioId, setMunicipioId] = useState<string>("");
-    const [cnes, setCnes] = useState<string>("");
+  const [uf, setUf] = useState("");
+  const [municipioId, setMunicipioId] = useState<string>("");
+  const [cnes, setCnes] = useState<string>("");
 
-    const [pdfs, setPdfs] = useState<PdfItem[]>([]);
-    const [loadingEstados, setLoadingEstados] = useState(false);
-    const [loadingMunicipios, setLoadingMunicipios] = useState(false);
-    const [loadingEstabs, setLoadingEstabs] = useState(false);
-    const [loadingPdfs, setLoadingPdfs] = useState(false);
+  const [pdfs, setPdfs] = useState<PdfItem[]>([]);
+  const [loadingEstados, setLoadingEstados] = useState(false);
+  const [loadingMunicipios, setLoadingMunicipios] = useState(false);
+  const [loadingEstabs, setLoadingEstabs] = useState(false);
+  const [loadingPdfs, setLoadingPdfs] = useState(false);
 
-    const [errorMsg, setErrorMsg] = useState("");
-    const [successMsg, setSuccessMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
-    const canLoadMunicipios = Boolean(uf);
-    const canLoadEstabs = Boolean(municipioId);
+  const [assinados, setAssinados] = useState<AssinadoMap>(() => loadAssinados());
 
-    // =========================
-    // Carregar Estados
-    // =========================
-    useEffect(() => {
-        let alive = true;
+  const canLoadMunicipios = Boolean(uf);
+  const canLoadEstabs = Boolean(municipioId);
 
-        async function loadEstados() {
-            if (!API_URL) return;
+  const isAssinado = (filename: string) => Boolean(assinados[filename]);
 
-            try {
-                setLoadingEstados(true);
-                const resp = await fetch(`${API_URL}/localidades/estados`);
-                const data = (await resp.json()) as EstadoApi[];
-                if (!alive) return;
-                setEstados(Array.isArray(data) ? data : []);
-            } catch (e) {
-                console.error(e);
-                if (!alive) return;
-                setEstados([]);
-                setErrorMsg("Erro ao carregar estados.");
-            } finally {
-                if (alive) setLoadingEstados(false);
-            }
-        }
+  const setAssinado = (filename: string, value: boolean) => {
+    setAssinados((prev) => {
+      const next = { ...prev, [filename]: value };
+      localStorage.setItem(ASSINADOS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
-        loadEstados();
-        return () => {
-            alive = false;
-        };
-    }, []);
+  // =========================
+  // Carregar Estados
+  // =========================
+  useEffect(() => {
+    let alive = true;
 
-    // =========================
-    // Carregar Municípios por UF
-    // =========================
-    useEffect(() => {
-        let alive = true;
+    async function loadEstados() {
+      if (!API_URL) return;
 
-        async function loadMunicipios() {
-            setMunicipios([]);
-            setMunicipioId("");
-            setEstabelecimentos([]);
-            setCnes("");
+      try {
+        setLoadingEstados(true);
+        const resp = await fetch(`${API_URL}/localidades/estados`);
+        const data = (await resp.json()) as EstadoApi[];
+        if (!alive) return;
+        setEstados(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setEstados([]);
+        setErrorMsg("Erro ao carregar estados.");
+      } finally {
+        if (alive) setLoadingEstados(false);
+      }
+    }
 
-            if (!API_URL || !uf) return;
-
-            try {
-                setLoadingMunicipios(true);
-                const resp = await fetch(`${API_URL}/localidades/municipios?uf=${encodeURIComponent(uf)}`);
-                const data = (await resp.json()) as MunicipioApi[];
-                if (!alive) return;
-                setMunicipios(Array.isArray(data) ? data : []);
-            } catch (e) {
-                console.error(e);
-                if (!alive) return;
-                setMunicipios([]);
-                setErrorMsg("Erro ao carregar municípios.");
-            } finally {
-                if (alive) setLoadingMunicipios(false);
-            }
-        }
-
-        loadMunicipios();
-        return () => {
-            alive = false;
-        };
-    }, [uf]);
-
-    // =========================
-    // Carregar Estabelecimentos por Município
-    // =========================
-    useEffect(() => {
-        let alive = true;
-
-        async function loadEstabs() {
-            setEstabelecimentos([]);
-            setCnes("");
-
-            if (!API_URL || !municipioId) return;
-
-            try {
-                setLoadingEstabs(true);
-                const resp = await fetch(
-                    `${API_URL}/estabelecimentos?municipio_id=${encodeURIComponent(municipioId)}`
-                );
-                const data = (await resp.json()) as Estabelecimento[];
-                if (!alive) return;
-                setEstabelecimentos(Array.isArray(data) ? data : []);
-            } catch (e) {
-                console.error(e);
-                if (!alive) return;
-                setEstabelecimentos([]);
-                setErrorMsg("Erro ao carregar estabelecimentos.");
-            } finally {
-                if (alive) setLoadingEstabs(false);
-            }
-        }
-
-        loadEstabs();
-        return () => {
-            alive = false;
-        };
-    }, [municipioId]);
-
-    // =========================
-    // Carregar PDFs (lista)
-    // =========================
-    const fetchPdfs = async () => {
-        setErrorMsg("");
-        setSuccessMsg("");
-
-        if (!API_URL) {
-            setErrorMsg("VITE_API_URL não configurado no .env do front.");
-            return;
-        }
-
-        try {
-            setLoadingPdfs(true);
-            const resp = await fetch(`${API_URL}/uploads`);
-            const data = (await resp.json()) as PdfListResponse;
-
-            if (!resp.ok || !data || (data as any).ok === false) {
-                const msg = (data as any)?.message || "Erro ao listar PDFs.";
-                throw new Error(msg);
-            }
-
-            const list = (data as any).files as PdfItem[];
-            setPdfs(Array.isArray(list) ? list : []);
-            setSuccessMsg("Lista carregada.");
-        } catch (e: any) {
-            console.error(e);
-            setErrorMsg(e?.message || "Erro ao listar PDFs.");
-            setPdfs([]);
-        } finally {
-            setLoadingPdfs(false);
-        }
+    loadEstados();
+    return () => {
+      alive = false;
     };
+  }, []);
 
-    useEffect(() => {
-        fetchPdfs();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+  // =========================
+  // Carregar Municípios por UF
+  // =========================
+  useEffect(() => {
+    let alive = true;
 
-    // =========================
-    // Filtro local (front)
-    // =========================
-    const filteredPdfs = useMemo(() => {
-        let list = [...pdfs];
+    async function loadMunicipios() {
+      // reset encadeado
+      setMunicipios([]);
+      setMunicipioId("");
+      setEstabelecimentos([]);
+      setCnes("");
 
-        if (isValidCnes(cnes)) {
-            list = list.filter((p) => String(p.cnes ?? "").trim() === String(cnes).trim());
-        }
+      setErrorMsg("");
+      setSuccessMsg("");
 
-        // ordena mais recentes primeiro
-        list.sort((a, b) => {
-            const da = toDate(a.createdAt)?.getTime() ?? 0;
-            const db = toDate(b.createdAt)?.getTime() ?? 0;
-            return db - da;
-        });
+      if (!API_URL || !uf) return;
 
-        return list;
-    }, [pdfs, cnes]);
+      try {
+        setLoadingMunicipios(true);
+        const resp = await fetch(
+          `${API_URL}/localidades/municipios?uf=${encodeURIComponent(uf)}`
+        );
+        const data = (await resp.json()) as MunicipioApi[];
+        if (!alive) return;
+        setMunicipios(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setMunicipios([]);
+        setErrorMsg("Erro ao carregar municípios.");
+      } finally {
+        if (alive) setLoadingMunicipios(false);
+      }
+    }
 
-    const selectedMunicipioName = useMemo(() => {
-        const m = municipios.find((x) => String(x.municipio_id) === String(municipioId));
-        return m?.nome || "";
-    }, [municipios, municipioId]);
-
-    const selectedEstab = useMemo(() => {
-        if (!cnes) return null;
-        return estabelecimentos.find((e) => e.cnes === cnes) || null;
-    }, [estabelecimentos, cnes]);
-
-    const handleClear = () => {
-        setUf("");
-        setMunicipioId("");
-        setCnes("");
-        setErrorMsg("");
-        setSuccessMsg("");
+    loadMunicipios();
+    return () => {
+      alive = false;
     };
+  }, [uf]);
 
-    const joinUrl = (base: string, pathname: string) => {
-        const b = String(base || "").replace(/\/+$/, "");
-        const p = String(pathname || "").replace(/^\/+/, "");
-        return `${b}/${p}`;
+  // =========================
+  // Carregar Estabelecimentos por Município
+  // =========================
+  useEffect(() => {
+    let alive = true;
+
+    async function loadEstabs() {
+      setEstabelecimentos([]);
+      setCnes("");
+
+      setErrorMsg("");
+      setSuccessMsg("");
+
+      if (!API_URL || !municipioId) return;
+
+      try {
+        setLoadingEstabs(true);
+        const resp = await fetch(
+          `${API_URL}/estabelecimentos?municipio_id=${encodeURIComponent(municipioId)}`
+        );
+        const data = (await resp.json()) as Estabelecimento[];
+        if (!alive) return;
+        setEstabelecimentos(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setEstabelecimentos([]);
+        setErrorMsg("Erro ao carregar estabelecimentos.");
+      } finally {
+        if (alive) setLoadingEstabs(false);
+      }
+    }
+
+    loadEstabs();
+    return () => {
+      alive = false;
     };
+  }, [municipioId]);
 
-    const openPdf = (item: PdfItem) => {
-        // monta /uploads/<filename> garantindo encode
-        const path = `uploads/${encodeURIComponent(item.filename)}`;
-        const fullUrl = joinUrl(API_URL, path);
+  // =========================
+  // Carregar PDFs (lista)
+  // =========================
+  const fetchPdfs = async () => {
+    setErrorMsg("");
+    setSuccessMsg("");
 
-        window.open(fullUrl, "_blank", "noopener,noreferrer");
-    };
+    if (!API_URL) {
+      setErrorMsg("VITE_API_URL não configurado no .env do front.");
+      return;
+    }
 
-    return (
-        <Box
-            sx={{
-                width: "100vw",
-                minHeight: "100vh",
-                backgroundColor: "#fff",
-                display: "flex",
-                justifyContent: "center",
-                pt: 4,
-                pb: 4,
-            }}
-        >
-            <Card sx={{ width: "100%", maxWidth: 900, boxShadow: 3 }}>
-                <CardContent sx={{ p: 4 }}>
-                    <Typography variant="h5" fontWeight={800} textAlign="center" gutterBottom>
-                        PDFs enviados
-                    </Typography>
+    try {
+      setLoadingPdfs(true);
+      const resp = await fetch(`${API_URL}/uploads`);
+      const data = (await resp.json()) as PdfListResponse;
 
-                    <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
-                        Filtre por UF, Município e Estabelecimento (CNES) para localizar os documentos.
-                    </Typography>
+      if (!resp.ok || !data || (data as any).ok === false) {
+        const msg = (data as any)?.message || "Erro ao listar PDFs.";
+        throw new Error(msg);
+      }
 
-                    {errorMsg && (
-                        <Alert severity="error" sx={{ mb: 2 }}>
-                            {errorMsg}
-                        </Alert>
-                    )}
-                    {successMsg && (
-                        <Alert severity="success" sx={{ mb: 2 }}>
-                            {successMsg}
-                        </Alert>
-                    )}
+      const list = (data as any).files as PdfItem[];
+      setPdfs(Array.isArray(list) ? list : []);
+      setSuccessMsg("Lista carregada.");
+    } catch (e: any) {
+      console.error(e);
+      setErrorMsg(e?.message || "Erro ao listar PDFs.");
+      setPdfs([]);
+    } finally {
+      setLoadingPdfs(false);
+    }
+  };
 
-                    {/* ===== Filtros ===== */}
-                    <Grid container spacing={2} sx={{ mb: 2 }}>
-                        <Grid size={{ xs: 12, md: 4 }}>
-                            <TextField
-                                select
-                                fullWidth
-                                label="UF"
-                                value={uf}
-                                onChange={(e) => setUf(String(e.target.value))}
-                                disabled={loadingEstados}
-                            >
-                                <MenuItem value="">
-                                    <em>{loadingEstados ? "Carregando..." : "Selecione"}</em>
-                                </MenuItem>
-                                {estados.map((e) => (
-                                    <MenuItem key={e.uf} value={e.uf}>
-                                        {e.uf} — {e.nome}
-                                    </MenuItem>
-                                ))}
-                            </TextField>
-                        </Grid>
+  useEffect(() => {
+    fetchPdfs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-                        <Grid size={{ xs: 12, md: 4 }}>
-                            <TextField
-                                select
-                                fullWidth
-                                label="Município"
-                                value={municipioId}
-                                onChange={(e) => setMunicipioId(String(e.target.value))}
-                                disabled={!canLoadMunicipios || loadingMunicipios}
-                            >
-                                <MenuItem value="">
-                                    <em>{!uf ? "Selecione UF" : loadingMunicipios ? "Carregando..." : "Selecione"}</em>
-                                </MenuItem>
-                                {municipios.map((m) => (
-                                    <MenuItem key={m.municipio_id} value={m.municipio_id}>
-                                        {m.nome}
-                                    </MenuItem>
-                                ))}
-                            </TextField>
-                        </Grid>
+  // =========================
+  // Filtro local (front)
+  // - CNES sempre normalizado (7 dígitos)
+  // - Se selecionou Município mas NÃO CNES: filtra pelos CNES carregados no select
+  // =========================
+  const filteredPdfs = useMemo(() => {
+    let list = [...pdfs];
 
-                        <Grid size={{ xs: 12, md: 4 }}>
-                            <TextField
-                                select
-                                fullWidth
-                                label="Estabelecimento (CNES)"
-                                value={cnes}
-                                onChange={(e) => setCnes(String(e.target.value))}
-                                disabled={!canLoadEstabs || loadingEstabs}
-                            >
-                                <MenuItem value="">
-                                    <em>{!municipioId ? "Selecione Município" : loadingEstabs ? "Carregando..." : "Selecione"}</em>
-                                </MenuItem>
-                                {estabelecimentos.map((est) => (
-                                    <MenuItem key={est.cnes} value={est.cnes}>
-                                        {est.nome} (CNES: {est.cnes})
-                                    </MenuItem>
-                                ))}
-                            </TextField>
-                        </Grid>
-                    </Grid>
+    const cnesNorm = normalizeCnes(cnes);
 
-                    {/* chips de contexto */}
-                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
-                        {uf && <Chip label={`UF: ${uf}`} />}
-                        {municipioId && <Chip label={`Município: ${selectedMunicipioName || municipioId}`} />}
-                        {cnes && <Chip label={`CNES: ${cnes}${selectedEstab ? ` — ${selectedEstab.nome}` : ""}`} />}
-                    </Stack>
+    // Município selecionado, mas sem CNES selecionado (ou CNES inválido):
+    if (municipioId && !isValidCnes(cnesNorm)) {
+      const allowed = new Set(
+        estabelecimentos.map((e) => normalizeCnes(e.cnes)).filter(Boolean)
+      );
 
-                    <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-                        <Button
-                            variant="outlined"
-                            startIcon={<RefreshIcon />}
-                            onClick={fetchPdfs}
-                            disabled={loadingPdfs}
-                            sx={{ textTransform: "none" }}
-                        >
-                            Atualizar lista
-                        </Button>
+      if (allowed.size > 0) {
+        list = list.filter((p) => allowed.has(normalizeCnes(p.cnes)));
+      }
+    }
 
-                        <Button variant="text" onClick={handleClear} sx={{ textTransform: "none" }}>
-                            Limpar filtros
-                        </Button>
+    // CNES selecionado e válido:
+    if (isValidCnes(cnesNorm)) {
+      list = list.filter((p) => normalizeCnes(p.cnes) === cnesNorm);
+    }
 
-                        <Box sx={{ flex: 1 }} />
+    // ordena mais recentes primeiro
+    list.sort((a, b) => {
+      const da = toDate(a.createdAt)?.getTime() ?? 0;
+      const db = toDate(b.createdAt)?.getTime() ?? 0;
+      return db - da;
+    });
 
-                        <Button variant="text" onClick={() => navigate(-1)} sx={{ textTransform: "none" }}>
-                            Voltar
-                        </Button>
+    return list;
+  }, [pdfs, cnes, municipioId, estabelecimentos]);
+
+  const selectedMunicipioName = useMemo(() => {
+    const m = municipios.find((x) => String(x.municipio_id) === String(municipioId));
+    return m?.nome || "";
+  }, [municipios, municipioId]);
+
+  const selectedEstab = useMemo(() => {
+    const c = normalizeCnes(cnes);
+    if (!c) return null;
+    return estabelecimentos.find((e) => normalizeCnes(e.cnes) === c) || null;
+  }, [estabelecimentos, cnes]);
+
+  const handleClear = () => {
+    setUf("");
+    setMunicipioId("");
+    setCnes("");
+    setErrorMsg("");
+    setSuccessMsg("");
+  };
+
+  const openPdf = (item: PdfItem) => {
+    const path = `uploads/${encodeURIComponent(item.filename)}`;
+    const fullUrl = joinUrl(API_URL, path);
+    window.open(fullUrl, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <Box
+      sx={{
+        width: "100vw",
+        minHeight: "100vh",
+        backgroundColor: "#fff",
+        display: "flex",
+        justifyContent: "center",
+        pt: 4,
+        pb: 4,
+      }}
+    >
+      <Card sx={{ width: "100%", maxWidth: 900, boxShadow: 3 }}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography variant="h5" fontWeight={800} textAlign="center" gutterBottom>
+            PDFs enviados
+          </Typography>
+
+          <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
+            Filtre por UF, Município e Estabelecimento (CNES) para localizar os documentos.
+          </Typography>
+
+          {errorMsg && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {errorMsg}
+            </Alert>
+          )}
+          {successMsg && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {successMsg}
+            </Alert>
+          )}
+
+          {/* ===== Filtros ===== */}
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                select
+                fullWidth
+                label="UF"
+                value={uf}
+                onChange={(e) => setUf(String(e.target.value))}
+                disabled={loadingEstados}
+              >
+                <MenuItem value="">
+                  <em>{loadingEstados ? "Carregando..." : "Selecione"}</em>
+                </MenuItem>
+                {estados.map((e) => (
+                  <MenuItem key={e.uf} value={e.uf}>
+                    {e.uf} — {e.nome}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                select
+                fullWidth
+                label="Município"
+                value={municipioId}
+                onChange={(e) => setMunicipioId(String(e.target.value))}
+                disabled={!canLoadMunicipios || loadingMunicipios}
+              >
+                <MenuItem value="">
+                  <em>
+                    {!uf ? "Selecione UF" : loadingMunicipios ? "Carregando..." : "Selecione"}
+                  </em>
+                </MenuItem>
+                {municipios.map((m) => (
+                  <MenuItem key={m.municipio_id} value={m.municipio_id}>
+                    {m.nome}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                select
+                fullWidth
+                label="Estabelecimento (CNES)"
+                value={cnes}
+                onChange={(e) => setCnes(normalizeCnes(e.target.value))}
+                disabled={!canLoadEstabs || loadingEstabs}
+              >
+                <MenuItem value="">
+                  <em>
+                    {!municipioId
+                      ? "Selecione Município"
+                      : loadingEstabs
+                      ? "Carregando..."
+                      : "Selecione"}
+                  </em>
+                </MenuItem>
+                {estabelecimentos.map((est) => {
+                  const cnesNorm = normalizeCnes(est.cnes);
+                  return (
+                    <MenuItem key={cnesNorm} value={cnesNorm}>
+                      {est.nome} (CNES: {cnesNorm})
+                    </MenuItem>
+                  );
+                })}
+              </TextField>
+            </Grid>
+          </Grid>
+
+          {/* chips de contexto */}
+          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
+            {uf && <Chip label={`UF: ${uf}`} />}
+            {municipioId && <Chip label={`Município: ${selectedMunicipioName || municipioId}`} />}
+            {cnes && (
+              <Chip label={`CNES: ${cnes}${selectedEstab ? ` — ${selectedEstab.nome}` : ""}`} />
+            )}
+          </Stack>
+
+          <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchPdfs}
+              disabled={loadingPdfs}
+              sx={{ textTransform: "none" }}
+            >
+              Atualizar lista
+            </Button>
+
+            <Button variant="text" onClick={handleClear} sx={{ textTransform: "none" }}>
+              Limpar filtros
+            </Button>
+
+            <Box sx={{ flex: 1 }} />
+
+            <Button variant="text" onClick={() => navigate(-1)} sx={{ textTransform: "none" }}>
+              Voltar
+            </Button>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {loadingPdfs && <LinearProgress sx={{ mb: 2 }} />}
+
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            Mostrando: {filteredPdfs.length} arquivo(s)
+          </Typography>
+
+          {/* ===== Lista ===== */}
+          {filteredPdfs.length === 0 ? (
+            <Alert severity="info">Nenhum PDF encontrado com os filtros atuais.</Alert>
+          ) : (
+            <List disablePadding>
+              {filteredPdfs.map((p) => (
+                <ListItem
+                  key={p.filename}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "grey.200",
+                    borderRadius: 2,
+                    mb: 1.5,
+                  }}
+                  secondaryAction={
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Tooltip title={isAssinado(p.filename) ? "Assinado" : "Não assinado"}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          <AssignmentTurnedInIcon
+                            fontSize="small"
+                            color={isAssinado(p.filename) ? "success" : "disabled"}
+                          />
+                          <Switch
+                            size="small"
+                            checked={isAssinado(p.filename)}
+                            onChange={(e) => setAssinado(p.filename, e.target.checked)}
+                            inputProps={{ "aria-label": "Marcar como assinado" }}
+                          />
+                        </Box>
+                      </Tooltip>
+
+                      <Tooltip title="Abrir PDF">
+                        <IconButton onClick={() => openPdf(p)} edge="end">
+                          <OpenInNewIcon />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
-
-                    <Divider sx={{ my: 2 }} />
-
-                    {loadingPdfs && <LinearProgress sx={{ mb: 2 }} />}
-
-                    <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                        Mostrando: {filteredPdfs.length} arquivo(s)
-                    </Typography>
-
-                    {/* ===== Lista ===== */}
-                    {filteredPdfs.length === 0 ? (
-                        <Alert severity="info">Nenhum PDF encontrado com os filtros atuais.</Alert>
-                    ) : (
-                        <List disablePadding>
-                            {filteredPdfs.map((p) => (
-                                <ListItem
-                                    key={p.filename}
-                                    sx={{
-                                        border: "1px solid",
-                                        borderColor: "grey.200",
-                                        borderRadius: 2,
-                                        mb: 1.5,
-                                    }}
-                                    secondaryAction={
-                                        <Box sx={{ display: "flex", gap: 1 }}>
-                                            <IconButton onClick={() => openPdf(p)} title="Abrir" edge="end">
-                                                <OpenInNewIcon />
-                                            </IconButton>
-                                        </Box>
-                                    }
-                                >
-                                    <ListItemText
-                                        primary={
-                                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                                                <PictureAsPdfIcon fontSize="small" />
-                                                <Typography fontWeight={800}>{friendlyNameFromFilename(p.filename)}</Typography>
-                                            </Box>
-                                        }
-                                        secondary={
-                                            <Box sx={{ mt: 0.5 }}>
-                                                <Typography variant="caption" display="block">
-                                                    Arquivo: {p.filename}
-                                                </Typography>
-                                                <Typography variant="caption" display="block">
-                                                    CNES: {p.cnes ?? "-"} • Tamanho: {p.sizeKB} KB • Criado em: {formatPtBrDate(p.createdAt)}
-                                                </Typography>
-                                            </Box>
-                                        }
-                                    />
-                                </ListItem>
-                            ))}
-                        </List>
-                    )}
-                </CardContent>
-            </Card>
-        </Box>
-    );
+                  }
+                >
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <PictureAsPdfIcon fontSize="small" />
+                        <Typography fontWeight={800}>
+                          {friendlyNameFromFilename(p.filename)}
+                        </Typography>
+                        {isAssinado(p.filename) && (
+                          <Chip size="small" label="Assinado" color="success" sx={{ ml: 1 }} />
+                        )}
+                      </Box>
+                    }
+                    secondary={
+                      <Box sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" display="block">
+                          Arquivo: {p.filename}
+                        </Typography>
+                        <Typography variant="caption" display="block">
+                          CNES: {normalizeCnes(p.cnes) || "-"} • Tamanho: {p.sizeKB} KB • Criado em:{" "}
+                          {formatPtBrDate(p.createdAt)}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </CardContent>
+      </Card>
+    </Box>
+  );
 }

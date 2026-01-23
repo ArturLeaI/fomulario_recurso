@@ -533,6 +533,17 @@ export default function FormularioVagasMunicipio() {
         return;
       }
 
+      // ✅ dados do gestor para o PDF
+      const dadosGestor = JSON.parse(sessionStorage.getItem("dadosGestor") || "{}");
+      const gestorNome = String(dadosGestor?.nome || "").trim();
+      const gestorCpf = String(dadosGestor?.cpf || "").trim();
+
+      if (!gestorNome || !gestorCpf) {
+        alert("Dados do responsável incompletos (nome/CPF). Volte e preencha os dados do responsável.");
+        navigate("/dados-gestor");
+        return;
+      }
+
       if (!tipoAcao) {
         alert("Selecione o tipo de ação.");
         return;
@@ -545,8 +556,12 @@ export default function FormularioVagasMunicipio() {
 
       // ✅ desistência: só valida campos da desistência
       if (tipoAcao === "descredenciar vaga") {
-        if (!cnesDescredenciar) {
+        if (!estabelecimentoSelecionado?.cnes) {
           alert("Selecione o estabelecimento (CNES).");
+          return;
+        }
+        if (!cursoSelecionado) {
+          alert("Selecione o aprimoramento.");
           return;
         }
         if (!motivoDescredenciar) {
@@ -579,7 +594,9 @@ export default function FormularioVagasMunicipio() {
         }
 
         if (totalRemover !== totalAdicionar) {
-          alert(`Mudança de curso precisa manter o total de vagas: remover=${totalRemover} e adicionar=${totalAdicionar}.`);
+          alert(
+            `Mudança de curso precisa manter o total de vagas: remover=${totalRemover} e adicionar=${totalAdicionar}.`
+          );
           return;
         }
       }
@@ -594,7 +611,13 @@ export default function FormularioVagasMunicipio() {
             ufSelecionada,
             municipio_id: municipioId,
             municipioSelecionado,
-            cnes: cnesDescredenciar,
+
+            // ✅ agora vem do select real
+            cnes: estabelecimentoSelecionado?.cnes,
+
+            // ✅ se o backend aceitar/precisar, envie também o curso
+            curso_id: cursoSelecionado?.id,
+            curso_nome: cursoSelecionado?.nome,
           }
           : tipoAcao === "mudanca_curso"
             ? {
@@ -657,49 +680,74 @@ export default function FormularioVagasMunicipio() {
       sessionStorage.setItem("acaoVagaResposta", JSON.stringify(resp));
 
       // ==============================
-      // ✅ GERAR PDF(s) — SOMENTE QUANDO FOR INCLUIR NOVO APRIMORAMENTO, GERAR 2
-      // - incluir_aprimoramento: Anexo I + Anexo II
-      // - outras ações com curso: Anexo I
-      // - descredenciar: não gera PDF
+      // ✅ GERAR PDF(s)
+      // - Anexo I: sempre que não for "descredenciar vaga"
+      // - Anexo II: perda de prazo + incluir aprimoramento
       // ==============================
       {
         const nomeente = sessionStorage.getItem("nomeente") || municipioSelecionado;
         const cnpj = sessionStorage.getItem("cnpj") || "";
         const sede = sessionStorage.getItem("sede") || "";
-        const representacao = sessionStorage.getItem("representacao") || "";
+
+        const representacao =
+          sessionStorage.getItem("representacao") ||
+          `${gestorNome} (CPF: ${gestorCpf})`;
 
         const hoje = new Date();
         const dia = String(hoje.getDate());
         const mes = hoje.toLocaleString("pt-BR", { month: "long" });
 
-        // ✅ Lista que vai pro Anexo I depende da ação:
-        // - descredenciar: 1 linha "Descredenciar vaga" com CNES escolhido
-        // - mudanca_curso: usa cursosRemover
-        // - demais: usa cursosAdicionados
-        const listaParaTermo =
+        // =========================
+        // 1) Base única de itens da ação (para gerar os 2 anexos)
+        // =========================
+        type ItemAcao = {
+          nomecurso: string;
+          vagas: number;
+          cnes: string;
+          nomeestabelecimento: string;
+        };
+
+        const itensDaAcao: ItemAcao[] =
           tipoAcao === "descredenciar vaga"
             ? [
               {
-                nome: `DESISTÊNCIA DA ADESÃO - ${motivoDescredenciar || "MOTIVO NÃO INFORMADO"}`,
-                cnes: cnesDescredenciar,
-                quantidade: 0,
+                nomecurso:
+                  cursoSelecionado?.nome
+                    ? `DESISTÊNCIA - ${cursoSelecionado.nome} (${motivoDescredenciar || "MOTIVO NÃO INFORMADO"})`
+                    : `DESISTÊNCIA (${motivoDescredenciar || "MOTIVO NÃO INFORMADO"})`,
+                vagas: 0,
+                cnes: estabelecimentoSelecionado?.cnes || "",
+                nomeestabelecimento: estabelecimentoSelecionado?.nome || "",
               },
             ]
             : tipoAcao === "mudanca_curso"
               ? cursosRemover.map((c) => ({
-                nome: c.nome,
+                nomecurso: c.nome,
+                vagas: Number(c.quantidade || 0),
                 cnes: c.cnes,
-                quantidade: Number(c.quantidade || 0),
+                nomeestabelecimento: c.estabelecimento,
               }))
               : cursosAdicionados.map((c) => ({
-                nome: c.nome,
+                nomecurso: c.nome,
+                vagas: Number(c.quantidade || 0),
                 cnes: c.cnes,
-                quantidade: Number(c.quantidade || 0),
+                nomeestabelecimento: c.estabelecimento,
               }));
 
-        const totalVagas = listaParaTermo.reduce((acc, c: any) => acc + Number(c.quantidade || 0), 0);
+        // =========================
+        // 2) ANEXO I (Termo de Adesão) - sempre
+        // =========================
+        const listaParaTermo = itensDaAcao.map((x) => ({
+          nome: x.nomecurso,
+          cnes: x.cnes,
+          quantidade: x.vagas,
+        }));
 
-        // --------- ANEXO I (sempre) ---------
+        const totalVagas = listaParaTermo.reduce(
+          (acc, c) => acc + Number(c.quantidade || 0),
+          0
+        );
+
         const termoFile = await gerarTermoPdfFile({
           tipoAcao,
           totalvagas: totalVagas,
@@ -709,62 +757,67 @@ export default function FormularioVagasMunicipio() {
           representacao,
           dia,
           mes,
-          aprimoramentos: listaParaTermo.map((c: any) => ({
+
+          gestorNome,
+          gestorCpf,
+
+          aprimoramentos: listaParaTermo.map((c) => ({
             name: c.nome,
             cnes: c.cnes,
             vagas: Number(c.quantidade || 0),
           })),
         });
 
-
         downloadFile(termoFile, "Termo_de_Adesao_Anexo_I.pdf");
 
-        // --------- ANEXO II (somente perda de prazo / adesao_edital) ---------
-        if (tipoAcao === "adesao_edital") {
-          const nomeente = sessionStorage.getItem("nomeente") || municipioSelecionado;
+        // =========================
+        // 3) ANEXO II (Estabelecimentos) - sempre
+        // =========================
 
-          const hoje = new Date();
-          const dia = String(hoje.getDate());
-          const mes = hoje.toLocaleString("pt-BR", { month: "long" });
+        // mapa CNES -> estabelecimento (pra puxar diretor_nome)
+        const estabByCnes = new Map<string, Estabelecimento>();
+        estabelecimentosDisponiveis.forEach((e) => estabByCnes.set(e.cnes, e));
 
-          const estabByCnes = new Map<string, Estabelecimento>();
-          estabelecimentosDisponiveis.forEach((e) => estabByCnes.set(e.cnes, e));
+        // lista de linhas (curso + vagas por estabelecimento)
+        const establist = itensDaAcao.map((x) => ({
+          nomeestabelecimento: x.nomeestabelecimento,
+          cnes: x.cnes,
+          nomecurso: x.nomecurso,
+          vagas: Number(x.vagas || 0),
+        }));
 
-          const establist = cursosAdicionados.map((c) => ({
-            nomeestabelecimento: c.estabelecimento,
-            cnes: c.cnes,
-            nomecurso: c.nome,
-            vagas: Number(c.quantidade || 0),
-          }));
-
-          const seen = new Set<string>();
-          const assinaturalist = cursosAdicionados
-            .filter((c) => {
-              if (seen.has(c.cnes)) return false;
-              seen.add(c.cnes);
-              return true;
-            })
-            .map((c) => {
-              const est = estabByCnes.get(c.cnes) || null;
-              return {
-                nomeestabelecimento: c.estabelecimento,
-                cnes: c.cnes,
-                nomediretor: (est as any)?.diretor_nome ?? "",
-              };
-            });
-
-          const termoEstabFile = await gerarTermoEstabelecimentosPdfFile({
-            nomeente,
-            tipoAcao, // obrigatório
-            establist,
-            assinaturalist,
-            dia,
-            mes,
-            ano: String(hoje.getFullYear()),
+        // lista única por CNES (assinaturas)
+        const seen = new Set<string>();
+        const assinaturalist = itensDaAcao
+          .filter((x) => {
+            if (!x.cnes) return false;
+            if (seen.has(x.cnes)) return false;
+            seen.add(x.cnes);
+            return true;
+          })
+          .map((x) => {
+            const est = estabByCnes.get(x.cnes) || null;
+            return {
+              nomeestabelecimento: x.nomeestabelecimento,
+              cnes: x.cnes,
+              nomediretor: (est as any)?.diretor_nome ?? "",
+            };
           });
 
-          downloadFile(termoEstabFile, "Termo_Estabelecimentos_Anexo_II.pdf");
-        }
+        const termoEstabFile = await gerarTermoEstabelecimentosPdfFile({
+          nomeente,
+          tipoAcao,
+          establist,
+          assinaturalist,
+          dia,
+          mes,
+          ano: String(hoje.getFullYear()),
+
+          gestorNome,
+          gestorCpf,
+        });
+
+        downloadFile(termoEstabFile, "Termo_Estabelecimentos_Anexo_II.pdf");
       }
 
       const cnesPrincipalUpload =
@@ -977,12 +1030,25 @@ export default function FormularioVagasMunicipio() {
           {/* ========================= Descredenciar ========================= */}
           {tipoAcao === "descredenciar vaga" && (
             <>
+              {/* ✅ Estabelecimento (CNES) */}
               <TextField
                 select
                 label="Estabelecimento (CNES)"
                 fullWidth
-                value={cnesDescredenciar}
-                onChange={(e) => setCnesDescredenciar(e.target.value)}
+                value={estabelecimentoSelecionado?.cnes || ""}
+                onChange={(e) => {
+                  const est = estabelecimentosDisponiveis.find((ex) => ex.cnes === e.target.value) || null;
+
+                  setEstabelecimentoSelecionado(est);
+
+                  // ao trocar o estabelecimento, resetar o curso
+                  setCursoSelecionado(null);
+
+                  // limpar coisas que não são usadas aqui
+                  setQuantidade("");
+                  setCursosAdicionados([]);
+                  setCursosRemover([]);
+                }}
                 disabled={loadingEstabelecimentos || !municipioId}
                 sx={{ mb: 2 }}
               >
@@ -997,6 +1063,31 @@ export default function FormularioVagasMunicipio() {
                 ))}
               </TextField>
 
+              {/* ✅ Aprimoramento (depende do estabelecimento) */}
+              <TextField
+                select
+                label="Aprimoramento"
+                fullWidth
+                value={cursoSelecionado?.id?.toString() || ""}
+                onChange={(e) => {
+                  const curso = cursosDisponiveis.find((c) => c.id.toString() === e.target.value) || null;
+                  setCursoSelecionado(curso);
+                }}
+                disabled={!estabelecimentoSelecionado || loadingCursos}
+                sx={{ mb: 2 }}
+              >
+                <MenuItem value="">
+                  <em>{loadingCursos ? "Carregando..." : "Selecione"}</em>
+                </MenuItem>
+
+                {cursosDisponiveis.map((c) => (
+                  <MenuItem key={c.id} value={c.id.toString()}>
+                    {c.nome}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {/* ✅ Motivo (mantém exatamente como era) */}
               <FormControl component="fieldset" sx={{ mb: 3 }}>
                 <FormLabel component="legend">Motivo</FormLabel>
                 <RadioGroup value={motivoDescredenciar} onChange={(e) => setMotivoDescredenciar(e.target.value)}>
@@ -1005,7 +1096,11 @@ export default function FormularioVagasMunicipio() {
                     control={<Radio />}
                     label="Desinteresse no Aprimoramento Ofertado"
                   />
-                  <FormControlLabel value="falta_demanda" control={<Radio />} label="Falta de Demanda para o Aprimoramento" />
+                  <FormControlLabel
+                    value="falta_demanda"
+                    control={<Radio />}
+                    label="Falta de Demanda para o Aprimoramento"
+                  />
                   <FormControlLabel
                     value="capacidade_insuficiente"
                     control={<Radio />}
@@ -1368,8 +1463,11 @@ export default function FormularioVagasMunicipio() {
             disabled={
               !tipoAcao ||
               !localidadeOk ||
-              (tipoAcao === "descredenciar vaga" && (!motivoDescredenciar || !cnesDescredenciar)) ||
-              (tipoAcao !== "descredenciar vaga" && tipoAcao !== "mudanca_curso" && cursosAdicionados.length === 0)
+              (tipoAcao === "descredenciar vaga" &&
+                (!estabelecimentoSelecionado || !cursoSelecionado || !motivoDescredenciar)) ||
+              (tipoAcao !== "descredenciar vaga" &&
+                tipoAcao !== "mudanca_curso" &&
+                cursosAdicionados.length === 0)
             }
           >
             Finalizar Solicitacao

@@ -90,8 +90,8 @@ export default function UploadArquivos() {
   const navigate = useNavigate();
 
   const [files, setFiles] = useState<UploadFile[]>([
-    { key: "termo", label: "Termo de Adesão Assinado (Pdf)", file: null },
-    { key: "recurso", label: "Termo de Estabelecimento Assinado (Pdf) — se aplicável", file: null },
+    { key: "termo", label: "Termo de Adesão (Pdf)", file: null },
+    { key: "recurso", label: "Termo de Estabelecimento (Pdf) — se aplicável", file: null },
   ]);
 
   // ✅ refs por tipo de documento (garante que cada botão abre o input certo)
