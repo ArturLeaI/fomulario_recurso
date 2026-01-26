@@ -113,7 +113,8 @@ export default function ReenviarDocumentos() {
     []
   );
 
-  const hasAtLeastOnePdf = useMemo(() => files.some((f) => !!f.file), [files]);
+  const selectedCount = useMemo(() => files.filter((f) => !!f.file).length, [files]);
+  const hasMinFiles = selectedCount >= 1;
 
   const resetMsgs = () => {
     setErrorMsg("");
@@ -201,7 +202,7 @@ export default function ReenviarDocumentos() {
   const handleUpload = async () => {
     resetMsgs();
 
-    if (!hasAtLeastOnePdf) {
+    if (!hasMinFiles) {
       setErrorMsg("Selecione pelo menos 1 PDF para enviar.");
       return;
     }
@@ -260,7 +261,7 @@ export default function ReenviarDocumentos() {
             Reenvio de Documentos
           </Typography>
 
-          <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
+          <Typography variant="body2" color="text.secondary" textAlign="center" mb={1}>
             Envio de termos referente a solicitações já realizadas.
           </Typography>
 
@@ -380,7 +381,7 @@ export default function ReenviarDocumentos() {
             fullWidth
             size="large"
             onClick={handleUpload}
-            disabled={loading || !hasAtLeastOnePdf || !isValidCnes(cnes)}
+            disabled={loading || !hasMinFiles || !isValidCnes(cnes)}
             sx={{ py: 1.6, fontWeight: 700, borderRadius: 2, textTransform: "none" }}
           >
             Enviar arquivos
