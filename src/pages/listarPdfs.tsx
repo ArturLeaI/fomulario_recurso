@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Card,
@@ -19,12 +19,19 @@ import {
   Grid,
   Tooltip,
   Switch,
+  InputAdornment,
+  Backdrop,
+  CircularProgress,
+  Collapse,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import SearchIcon from "@mui/icons-material/Search";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
@@ -43,6 +50,10 @@ type PdfItem = {
 
 type PdfListResponse =
   | { ok: true; total: number; files: PdfItem[] }
+  | { ok: false; message: string };
+
+type AssinadosResponse =
+  | { ok: true; map: AssinadoMap }
   | { ok: false; message: string };
 
 // =========================
@@ -94,6 +105,15 @@ function loadAssinados(): AssinadoMap {
   }
 }
 
+async function persistAssinado(filename: string, assinado: boolean) {
+  if (!API_URL) return;
+  await fetch(`${API_URL}/uploads/assinados`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, assinado }),
+  });
+}
+
 // ✅ filtro de status
 type StatusFiltro = "TODOS" | "ASSINADOS" | "NAO_ASSINADOS";
 
@@ -103,17 +123,25 @@ export default function ListarPdfs() {
   const [estados, setEstados] = useState<EstadoApi[]>([]);
   const [municipios, setMunicipios] = useState<MunicipioApi[]>([]);
   const [estabelecimentos, setEstabelecimentos] = useState<Estabelecimento[]>([]);
+  const [estabsByMunicipioId, setEstabsByMunicipioId] = useState<
+    Record<string, Estabelecimento[]>
+  >({});
+  const [estabsCache, setEstabsCache] = useState<Record<string, Estabelecimento[]>>({});
 
   const [uf, setUf] = useState("");
   const [municipioId, setMunicipioId] = useState<string>("");
   const [cnes, setCnes] = useState<string>("");
 
   const [statusFiltro, setStatusFiltro] = useState<StatusFiltro>("TODOS");
+  const [query, setQuery] = useState("");
+  const [showCnesFilter, setShowCnesFilter] = useState(true);
+  const [showNaoAssinadosFilter, setShowNaoAssinadosFilter] = useState(true);
 
   const [pdfs, setPdfs] = useState<PdfItem[]>([]);
   const [loadingEstados, setLoadingEstados] = useState(false);
   const [loadingMunicipios, setLoadingMunicipios] = useState(false);
   const [loadingEstabs, setLoadingEstabs] = useState(false);
+  const [loadingEstabsUf, setLoadingEstabsUf] = useState(false);
   const [loadingPdfs, setLoadingPdfs] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState("");
@@ -124,13 +152,36 @@ export default function ListarPdfs() {
   const canLoadMunicipios = Boolean(uf);
   const canLoadEstabs = Boolean(municipioId);
 
+  const deferredUf = useDeferredValue(uf);
+  const deferredCnes = useDeferredValue(cnes);
+  const deferredStatusFiltro = useDeferredValue(statusFiltro);
+  const deferredQuery = useDeferredValue(query);
+  const deferredAssinados = useDeferredValue(assinados);
+
   const isAssinado = (filename: string) => Boolean(assinados[filename]);
+
+  const isBusy =
+    loadingPdfs || loadingEstabsUf || loadingEstados || loadingMunicipios || loadingEstabs;
+  const busyLabel = loadingPdfs
+    ? "Atualizando PDFs..."
+    : loadingEstabsUf
+      ? "Carregando estabelecimentos da UF..."
+      : loadingMunicipios
+        ? "Carregando municípios..."
+        : loadingEstabs
+          ? "Carregando estabelecimentos..."
+          : loadingEstados
+            ? "Carregando estados..."
+            : "Carregando...";
 
   const setAssinado = (filename: string, value: boolean) => {
     setAssinados((prev) => {
       const next = { ...prev, [filename]: value };
       localStorage.setItem(ASSINADOS_STORAGE_KEY, JSON.stringify(next));
       return next;
+    });
+    persistAssinado(filename, value).catch(() => {
+      setErrorMsg("Não foi possível salvar o status no servidor.");
     });
   };
 
@@ -175,7 +226,9 @@ export default function ListarPdfs() {
       setMunicipios([]);
       setMunicipioId("");
       setEstabelecimentos([]);
+      setEstabsByMunicipioId({});
       setCnes("");
+      setQuery("");
 
       setErrorMsg("");
       setSuccessMsg("");
@@ -205,6 +258,85 @@ export default function ListarPdfs() {
       alive = false;
     };
   }, [uf]);
+
+  // =========================
+  // Carregar Estabelecimentos de todos os municípios da UF
+  // =========================
+  useEffect(() => {
+    let alive = true;
+
+    async function loadEstabsUf() {
+      setEstabsByMunicipioId({});
+      if (!API_URL || !uf || municipios.length === 0) return;
+
+      try {
+        const missing = municipios.filter((m) => !estabsCache[String(m.municipio_id)]);
+        if (missing.length === 0) {
+          const nextByMunicipio: Record<string, Estabelecimento[]> = {};
+          for (const m of municipios) {
+            const id = String(m.municipio_id);
+            nextByMunicipio[id] = estabsCache[id] ?? [];
+          }
+          setEstabsByMunicipioId(nextByMunicipio);
+          return;
+        }
+
+        setLoadingEstabsUf(true);
+
+        const fetchedPairs: Array<[string, Estabelecimento[]]> = [];
+        const CONCURRENCY = 6;
+        const queue = [...missing];
+
+        while (queue.length > 0) {
+          const batch = queue.splice(0, CONCURRENCY);
+          const batchPairs = await Promise.all(
+            batch.map(async (m) => {
+              try {
+                const resp = await fetch(
+                  `${API_URL}/estabelecimentos?municipio_id=${encodeURIComponent(
+                    m.municipio_id
+                  )}`
+                );
+                const data = (await resp.json()) as Estabelecimento[];
+                return [
+                  String(m.municipio_id),
+                  Array.isArray(data) ? data : ([] as Estabelecimento[]),
+                ] as [string, Estabelecimento[]];
+              } catch {
+                return [String(m.municipio_id), [] as Estabelecimento[]] as [
+                  string,
+                  Estabelecimento[],
+                ];
+              }
+            })
+          );
+          fetchedPairs.push(...batchPairs);
+        }
+
+        if (!alive) return;
+        const nextCache: Record<string, Estabelecimento[]> = {
+          ...estabsCache,
+        };
+        for (const [id, list] of fetchedPairs) nextCache[id] = list;
+
+        const nextByMunicipio: Record<string, Estabelecimento[]> = {};
+        for (const m of municipios) {
+          const id = String(m.municipio_id);
+          nextByMunicipio[id] = nextCache[id] ?? [];
+        }
+
+        setEstabsCache(nextCache);
+        setEstabsByMunicipioId(nextByMunicipio);
+      } finally {
+        if (alive) setLoadingEstabsUf(false);
+      }
+    }
+
+    loadEstabsUf();
+    return () => {
+      alive = false;
+    };
+  }, [uf, municipios, estabsCache]);
 
   // =========================
   // Carregar Estabelecimentos por Município
@@ -285,6 +417,44 @@ export default function ListarPdfs() {
   }, []);
 
   // =========================
+  // Sync assinados (localStorage -> servidor)
+  // =========================
+  useEffect(() => {
+    let alive = true;
+
+    async function syncAssinados() {
+      if (!API_URL) return;
+
+      try {
+        const resp = await fetch(`${API_URL}/uploads/assinados`);
+        const data = (await resp.json()) as AssinadosResponse;
+        const serverMap = resp.ok && (data as any).ok ? (data as any).map : {};
+
+        const localMap = loadAssinados();
+        const merged: AssinadoMap = { ...serverMap, ...localMap };
+
+        for (const [filename, assinado] of Object.entries(localMap)) {
+          if (serverMap?.[filename] !== assinado) {
+            await persistAssinado(filename, assinado);
+          }
+        }
+
+        if (!alive) return;
+        setAssinados(merged);
+        localStorage.setItem(ASSINADOS_STORAGE_KEY, JSON.stringify(merged));
+      } catch (e) {
+        if (!alive) return;
+        console.error(e);
+      }
+    }
+
+    syncAssinados();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // =========================
   // Filtro local (front)
   // =========================
 
@@ -299,16 +469,42 @@ export default function ListarPdfs() {
     return Array.from(set).sort();
   }, [pdfs]);
 
+  const totalAssinados = useMemo(() => {
+    let count = 0;
+    for (const p of pdfs) if (assinados[p.filename]) count += 1;
+    return count;
+  }, [pdfs, assinados]);
+
+  const totalNaoAssinados = useMemo(
+    () => Math.max(pdfs.length - totalAssinados, 0),
+    [pdfs.length, totalAssinados]
+  );
 
   const filteredPdfs = useMemo(() => {
     let list = [...pdfs];
 
-    const cnesNorm = normalizeCnes(cnes);
+    const cnesNorm = normalizeCnes(deferredCnes);
 
-    if (municipioId && !isValidCnes(cnesNorm)) {
-      const allowed = new Set(
-        estabelecimentos.map((e) => normalizeCnes(e.cnes)).filter(Boolean)
-      );
+    if (!isValidCnes(cnesNorm)) {
+      const allowed = new Set<string>();
+
+      if (estabelecimentos.length > 0) {
+        for (const e of estabelecimentos) {
+          const cn = normalizeCnes(e.cnes);
+          if (cn) allowed.add(cn);
+        }
+      }
+
+      if (allowed.size === 0 && municipios.length > 0 && deferredUf) {
+        for (const m of municipios) {
+          const estabsInMunicipio = estabsByMunicipioId[String(m.municipio_id)];
+          if (!estabsInMunicipio) continue;
+          for (const e of estabsInMunicipio) {
+            const cn = normalizeCnes(e.cnes);
+            if (cn) allowed.add(cn);
+          }
+        }
+      }
 
       if (allowed.size > 0) {
         list = list.filter((p) => allowed.has(normalizeCnes(p.cnes)));
@@ -319,10 +515,20 @@ export default function ListarPdfs() {
       list = list.filter((p) => normalizeCnes(p.cnes) === cnesNorm);
     }
 
-    if (statusFiltro === "ASSINADOS") {
-      list = list.filter((p) => isAssinado(p.filename));
-    } else if (statusFiltro === "NAO_ASSINADOS") {
-      list = list.filter((p) => !isAssinado(p.filename));
+    if (deferredStatusFiltro === "ASSINADOS") {
+      list = list.filter((p) => Boolean(deferredAssinados[p.filename]));
+    } else if (deferredStatusFiltro === "NAO_ASSINADOS") {
+      list = list.filter((p) => !deferredAssinados[p.filename]);
+    }
+
+    const q = deferredQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((p) => {
+        const file = String(p.filename || "").toLowerCase();
+        const name = friendlyNameFromFilename(p.filename).toLowerCase();
+        const cn = normalizeCnes(p.cnes);
+        return file.includes(q) || name.includes(q) || cn.includes(q);
+      });
     }
 
     list.sort((a, b) => {
@@ -332,7 +538,17 @@ export default function ListarPdfs() {
     });
 
     return list;
-  }, [pdfs, cnes, municipioId, estabelecimentos, statusFiltro, assinados]);
+  }, [
+    pdfs,
+    estabelecimentos,
+    estabsByMunicipioId,
+    municipios,
+    deferredCnes,
+    deferredUf,
+    deferredStatusFiltro,
+    deferredQuery,
+    deferredAssinados,
+  ]);
 
   // ✅ lista de CNES (únicos) dos PDFs NÃO assinados (respeita filtros atuais)
   const cnesNaoAssinados = useMemo(() => {
@@ -403,7 +619,25 @@ export default function ListarPdfs() {
       }}
     >
       <Card sx={{ width: "100%", maxWidth: 900, boxShadow: 3 }}>
-        <CardContent sx={{ p: 4 }}>
+        <CardContent sx={{ p: 4, position: "relative" }}>
+          <Backdrop
+            sx={{
+              position: "absolute",
+              zIndex: (theme) => theme.zIndex.drawer + 1,
+              color: "#111",
+              backgroundColor: "rgba(255,255,255,0.6)",
+              borderRadius: 2,
+            }}
+            open={isBusy}
+          >
+            <Stack alignItems="center" spacing={1}>
+              <CircularProgress size={28} />
+              <Typography variant="caption" fontWeight={600}>
+                {busyLabel}
+              </Typography>
+            </Stack>
+          </Backdrop>
+
           <Typography variant="h5" fontWeight={800} textAlign="center" gutterBottom>
             PDFs enviados
           </Typography>
@@ -422,6 +656,17 @@ export default function ListarPdfs() {
               {successMsg}
             </Alert>
           )}
+          {uf && loadingEstabsUf && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Carregando estabelecimentos da UF para aplicar o filtro dos PDFs...
+            </Alert>
+          )}
+
+          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
+            <Chip label={`Total: ${pdfs.length}`} color="default" />
+            <Chip label={`Assinados: ${totalAssinados}`} color="success" />
+            <Chip label={`Não assinados: ${totalNaoAssinados}`} color="warning" />
+          </Stack>
 
           {/* ===== Filtros ===== */}
           <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -511,6 +756,23 @@ export default function ListarPdfs() {
             </Grid>
           </Grid>
 
+          <TextField
+            fullWidth
+            label="Busca rápida (nome, arquivo ou CNES)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            sx={{ mb: 2 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          {(loadingPdfs || loadingEstabsUf) && <LinearProgress sx={{ mb: 2 }} />}
+
           {/* chips de contexto */}
           <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
             {uf && <Chip label={`UF: ${uf}`} />}
@@ -575,35 +837,49 @@ export default function ListarPdfs() {
               >
                 Limpar CNES
               </Button>
+
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowCnesFilter((v) => !v)}
+                sx={{ textTransform: "none" }}
+                endIcon={showCnesFilter ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              >
+                {showCnesFilter ? "Minimizar" : "Expandir"}
+              </Button>
             </Box>
 
-            {cnesUnicos.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                Nenhum CNES encontrado.
-              </Typography>
-            ) : (
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {cnesUnicos.map((cn) => {
-                  const selected = normalizeCnes(cnes) === cn;
+            <Collapse in={showCnesFilter} timeout="auto" unmountOnExit>
+              <Box sx={{ pt: 0.5 }}>
+                {cnesUnicos.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Nenhum CNES encontrado.
+                  </Typography>
+                ) : (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                    {cnesUnicos.map((cn) => {
+                      const selected = normalizeCnes(cnes) === cn;
 
-                  return (
-                    <Chip
-                      key={cn}
-                      label={cn}
-                      clickable
-                      color={selected ? "primary" : "default"}
-                      variant={selected ? "filled" : "outlined"}
-                      onClick={() => {
-                        setCnes(cn);
-                        setStatusFiltro("TODOS"); // ✅ sempre mostra assinados e não assinados desse CNES
-                        // opcional: se município/UF estiver escondendo PDFs de outros lugares:
-                        // setMunicipioId("");
-                      }}
-                    />
-                  );
-                })}
+                      return (
+                        <Chip
+                          key={cn}
+                          label={cn}
+                          clickable
+                          color={selected ? "primary" : "default"}
+                          variant={selected ? "filled" : "outlined"}
+                          onClick={() => {
+                            setCnes(cn);
+                            setStatusFiltro("TODOS"); // ✅ sempre mostra assinados e não assinados desse CNES
+                            // opcional: se município/UF estiver escondendo PDFs de outros lugares:
+                            // setMunicipioId("");
+                          }}
+                        />
+                      );
+                    })}
+                  </Box>
+                )}
               </Box>
-            )}
+            </Collapse>
           </Box>
 
           {/* ✅ CNES não assinados como filtro */}
@@ -637,39 +913,62 @@ export default function ListarPdfs() {
               >
                 Limpar CNES
               </Button>
+
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ContentCopyIcon />}
+                onClick={copyCnesNaoAssinados}
+                disabled={cnesNaoAssinados.length === 0}
+                sx={{ textTransform: "none" }}
+              >
+                Copiar lista
+              </Button>
+
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowNaoAssinadosFilter((v) => !v)}
+                sx={{ textTransform: "none" }}
+                endIcon={showNaoAssinadosFilter ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              >
+                {showNaoAssinadosFilter ? "Minimizar" : "Expandir"}
+              </Button>
             </Box>
 
-            {cnesNaoAssinados.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                Nenhum CNES pendente com os filtros atuais.
-              </Typography>
-            ) : (
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {cnesNaoAssinados.map((cn) => {
-                  const selected = normalizeCnes(cnes) === cn;
+            <Collapse in={showNaoAssinadosFilter} timeout="auto" unmountOnExit>
+              <Box sx={{ pt: 0.5 }}>
+                {cnesNaoAssinados.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Nenhum CNES pendente com os filtros atuais.
+                  </Typography>
+                ) : (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                    {cnesNaoAssinados.map((cn) => {
+                      const selected = normalizeCnes(cnes) === cn;
 
-                  return (
-                    <Chip
-                      key={cn}
-                      label={cn}
-                      clickable
-                      color={selected ? "primary" : "default"}
-                      variant={selected ? "filled" : "outlined"}
-                      onClick={() => {
-                        setCnes(cn);
-                        setStatusFiltro("TODOS"); // ✅ mostra assinados e não assinados do CNES
-                        // opcional: se municipio/uf estiver escondendo arquivos de outros lugares:
-                        // setMunicipioId("");
-                      }}
-                    />
-                  );
-                })}
+                      return (
+                        <Chip
+                          key={cn}
+                          label={cn}
+                          clickable
+                          color={selected ? "primary" : "default"}
+                          variant={selected ? "filled" : "outlined"}
+                          onClick={() => {
+                            setCnes(cn);
+                            setStatusFiltro("TODOS"); // ✅ mostra assinados e não assinados do CNES
+                            // opcional: se municipio/uf estiver escondendo arquivos de outros lugares:
+                            // setMunicipioId("");
+                          }}
+                        />
+                      );
+                    })}
+                  </Box>
+                )}
               </Box>
-            )}
+            </Collapse>
           </Box>
 
-
-          {loadingPdfs && <LinearProgress sx={{ mb: 2 }} />}
 
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
             Mostrando: {filteredPdfs.length} arquivo(s)
