@@ -6,6 +6,7 @@ import DadosMunicipio from "../pages/dadosTecnicosMunicipal";
 import FormularioVagas from "../pages/formVagas";
 import UploadArquivos from "../pages/uploadArquivos";
 import ListarPdfs from "../pages/listarPdfs";
+import ReenviarDocumentos from "../pages/uploadsReenvio";
 
 export default function AppRoutes() {
   return (
@@ -18,6 +19,7 @@ export default function AppRoutes() {
       <Route path="/form-vagas" element={<FormularioVagas />} />
       <Route path="/upload" element={<UploadArquivos />} />
       <Route path="/listar-pdf" element={<ListarPdfs />} />
+      <Route path="/reenvio" element={<ReenviarDocumentos />} />
 
 
       {/* fallback */}
