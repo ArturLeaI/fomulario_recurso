@@ -35,10 +35,6 @@ function isPdf(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
-/**
- * ✅ CNES: NÃO normaliza, NÃO valida tamanho.
- * Regra: só precisa existir (não vazio).
- */
 function isValidCnes(value: unknown) {
   return String(value ?? "").trim().length > 0;
 }
@@ -46,11 +42,10 @@ function isValidCnes(value: unknown) {
 /**
  * ✅ CNES vem do sessionStorage (definido na página anterior)
  * - se não existir, tenta fallback na acaoVagaResposta (legado)
- * - NÃO normaliza, NÃO valida tamanho: pega exatamente o valor disponível (trim)
  */
 function getCnesForUpload(): string {
   const direct = String(sessionStorage.getItem("cnesPrincipalUpload") || "").trim();
-  if (direct) return direct;
+  if (isValidCnes(direct)) return direct;
 
   const raw = sessionStorage.getItem("acaoVagaResposta");
   if (!raw) return "";
@@ -59,7 +54,7 @@ function getCnesForUpload(): string {
     const obj = JSON.parse(raw);
 
     const directFromResp = String(obj?.cnes ?? "").trim();
-    if (directFromResp) return directFromResp;
+    if (isValidCnes(directFromResp)) return directFromResp;
 
     const candidatesArrays: any[] = [
       obj?.cursosAdicionar,
@@ -74,7 +69,7 @@ function getCnesForUpload(): string {
     ].filter(Array.isArray);
 
     for (const arr of candidatesArrays) {
-      const firstWithCnes = arr.find((x: any) => String(x?.cnes ?? "").trim().length > 0);
+      const firstWithCnes = arr.find((x: any) => isValidCnes(x?.cnes));
       if (firstWithCnes) return String(firstWithCnes.cnes).trim();
     }
 
@@ -83,7 +78,9 @@ function getCnesForUpload(): string {
       String(obj?.result?.cnes ?? "").trim() ||
       String(obj?.res?.cnes ?? "").trim();
 
-    return nested || "";
+    if (isValidCnes(nested)) return nested;
+
+    return "";
   } catch {
     return "";
   }
@@ -93,8 +90,8 @@ export default function UploadArquivos() {
   const navigate = useNavigate();
 
   const [files, setFiles] = useState<UploadFile[]>([
-    { key: "termo", label: "Termo de Adesão (Pdf)", file: null },
-    { key: "recurso", label: "Termo de Estabelecimento (Pdf) — se aplicável", file: null },
+    { key: "termo", label: "Termo de Adesão (PDF)", file: null },
+    { key: "recurso", label: "Termo de Estabelecimento (PDF) ", file: null },
   ]);
 
   // ✅ refs por tipo de documento (garante que cada botão abre o input certo)
@@ -178,7 +175,7 @@ export default function UploadArquivos() {
 
     const form = new FormData();
     form.append("file", file);
-    form.append("cnes", cnes); // ✅ sem normalização
+    form.append("cnes", cnes);
     form.append("docType", docType);
 
     if (gestorId) form.append("gestorId", gestorId);
@@ -212,7 +209,7 @@ export default function UploadArquivos() {
 
     const cnes = getCnesForUpload();
     if (!isValidCnes(cnes)) {
-      setErrorMsg("CNES não encontrado. Volte e selecione o estabelecimento.");
+      setErrorMsg("CNES não encontrado ou inválido. Volte e selecione o estabelecimento.");
       return;
     }
 
@@ -232,7 +229,7 @@ export default function UploadArquivos() {
       // ✅ feedback visual + modal de sucesso
       setUploadedResumo(uploaded);
       setSuccessMsg("Arquivos enviados com sucesso!");
-      setSuccessOpen(true);
+      setSuccessOpen(true); // ✅ abre confirmação visual (não navega ainda)
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err?.message || "Erro ao enviar arquivos.");
@@ -334,6 +331,7 @@ export default function UploadArquivos() {
                   }
                 />
 
+                {/* ✅ input escondido (um por item), com ref específico */}
                 <input
                   ref={(el) => {
                     inputRefs.current[item.key] = el;
@@ -344,6 +342,7 @@ export default function UploadArquivos() {
                   onChange={handlePickFile(item.key)}
                 />
 
+                {/* ✅ botão chama o input correto */}
                 <Button
                   variant={item.file ? "outlined" : "contained"}
                   startIcon={<UploadFileIcon />}
@@ -380,7 +379,13 @@ export default function UploadArquivos() {
             Voltar
           </Button>
 
-          <Dialog open={successOpen} onClose={() => {}} disableEscapeKeyDown aria-labelledby="upload-success-title">
+          {/* ✅ CONFIRMAÇÃO VISUAL FORTE (modal) */}
+          <Dialog
+            open={successOpen}
+            onClose={() => {}}
+            disableEscapeKeyDown
+            aria-labelledby="upload-success-title"
+          >
             <DialogTitle
               id="upload-success-title"
               sx={{ display: "flex", alignItems: "center", gap: 1 }}
@@ -390,7 +395,9 @@ export default function UploadArquivos() {
             </DialogTitle>
 
             <DialogContent dividers>
-              <Typography sx={{ mb: 1 }}>Sua solicitação foi enviada com sucesso.</Typography>
+              <Typography sx={{ mb: 1 }}>
+                Sua solicitação foi enviada com sucesso.
+              </Typography>
 
               {uploadedResumo.length > 0 && (
                 <Box sx={{ mt: 1 }}>

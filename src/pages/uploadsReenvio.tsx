@@ -90,8 +90,8 @@ export default function ReenviarDocumentos() {
   const navigate = useNavigate();
 
   const [files, setFiles] = useState<UploadFile[]>([
-    { key: "termo", label: "Termo de Adesão (Pdf)", file: null },
-    { key: "recurso", label: "Termo de Estabelecimento (Pdf) — se aplicável", file: null },
+    { key: "termo", label: "Termo de Adesão (PDF)", file: null },
+    { key: "recurso", label: "Termo de Estabelecimento (PDF) ", file: null },
   ]);
 
   const inputRefs = useRef<Record<UploadFile["key"], HTMLInputElement | null>>({
@@ -261,7 +261,7 @@ export default function ReenviarDocumentos() {
           </Typography>
 
           <Typography variant="body2" color="text.secondary" textAlign="center" mb={3}>
-            Envio de termos referente a solicitacoes ja realizadas.
+            Envio de termos referente a solicitações já realizadas.
           </Typography>
 
           {/* ✅ CNES digitável */}
