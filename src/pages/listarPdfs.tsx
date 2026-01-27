@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Pagination,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
@@ -150,6 +151,8 @@ export default function ListarPdfs() {
   const [editFilename, setEditFilename] = useState<string>("");
   const [editCnes, setEditCnes] = useState<string>("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
 
   const [pdfs, setPdfs] = useState<PdfItem[]>([]);
   const [loadingEstados, setLoadingEstados] = useState(false);
@@ -620,6 +623,16 @@ export default function ListarPdfs() {
     deferredAssinados,
   ]);
 
+  const totalPages = Math.max(Math.ceil(filteredPdfs.length / pageSize), 1);
+  const pagedPdfs = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredPdfs.slice(start, start + pageSize);
+  }, [filteredPdfs, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [deferredCnes, deferredUf, deferredStatusFiltro, deferredQuery, filteredPdfs.length]);
+
   // ✅ lista de CNES (únicos) dos PDFs NÃO assinados (respeita filtros atuais)
   const cnesNaoAssinados = useMemo(() => {
     const set = new Set<string>();
@@ -1049,12 +1062,12 @@ export default function ListarPdfs() {
             <Alert severity="info">Nenhum PDF encontrado com os filtros atuais.</Alert>
           ) : (
             <List disablePadding>
-          {filteredPdfs.map((p) => (
-            <ListItem
-              key={p.filename}
-              sx={{
-                border: "1px solid",
-                borderColor: "grey.200",
+              {pagedPdfs.map((p) => (
+                <ListItem
+                  key={p.filename}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "grey.200",
                 borderRadius: 2,
                 mb: 1.5,
               }}
@@ -1148,6 +1161,18 @@ export default function ListarPdfs() {
                 </ListItem>
               ))}
             </List>
+          )}
+
+          {filteredPdfs.length > pageSize && (
+            <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
+              <Pagination
+                count={totalPages}
+                page={page}
+                onChange={(_, value) => setPage(value)}
+                color="primary"
+                shape="rounded"
+              />
+            </Box>
           )}
         </CardContent>
       </Card>
