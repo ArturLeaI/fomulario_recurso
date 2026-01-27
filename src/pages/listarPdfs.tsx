@@ -23,6 +23,10 @@ import {
   Backdrop,
   CircularProgress,
   Collapse,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
@@ -32,6 +36,8 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SearchIcon from "@mui/icons-material/Search";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
@@ -54,6 +60,10 @@ type PdfListResponse =
 
 type AssinadosResponse =
   | { ok: true; map: AssinadoMap }
+  | { ok: false; message: string };
+
+type UpdateCnesResponse =
+  | { ok: true; filename: string; cnes: string }
   | { ok: false; message: string };
 
 // =========================
@@ -136,6 +146,10 @@ export default function ListarPdfs() {
   const [query, setQuery] = useState("");
   const [showCnesFilter, setShowCnesFilter] = useState(true);
   const [showNaoAssinadosFilter, setShowNaoAssinadosFilter] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editFilename, setEditFilename] = useState<string>("");
+  const [editCnes, setEditCnes] = useState<string>("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const [pdfs, setPdfs] = useState<PdfItem[]>([]);
   const [loadingEstados, setLoadingEstados] = useState(false);
@@ -183,6 +197,62 @@ export default function ListarPdfs() {
     persistAssinado(filename, value).catch(() => {
       setErrorMsg("Não foi possível salvar o status no servidor.");
     });
+  };
+
+  const openEditCnes = (item: PdfItem) => {
+    setEditFilename(item.filename);
+    setEditCnes(String(item.cnes ?? ""));
+    setEditOpen(true);
+  };
+
+  const saveEditCnes = async () => {
+    if (!API_URL) {
+      setErrorMsg("VITE_API_URL não configurado no .env do front.");
+      return;
+    }
+    if (!editFilename) return;
+
+    const cnesValue = String(editCnes ?? "").trim();
+    if (!cnesValue) {
+      setErrorMsg("CNES é obrigatório.");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      const resp = await fetch(`${API_URL}/uploads/metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: editFilename, cnes: cnesValue }),
+      });
+      const data = (await resp.json()) as UpdateCnesResponse;
+      if (!resp.ok || !data || (data as any).ok === false) {
+        const msg = (data as any)?.message || "Erro ao atualizar CNES.";
+        throw new Error(msg);
+      }
+
+      const newFilename = (data as any).filename as string;
+      setPdfs((prev) =>
+        prev.map((p) =>
+          p.filename === editFilename ? { ...p, filename: newFilename, cnes: cnesValue } : p
+        )
+      );
+
+      setAssinados((prev) => {
+        if (prev[editFilename] === undefined) return prev;
+        const next = { ...prev, [newFilename]: prev[editFilename] };
+        delete next[editFilename];
+        localStorage.setItem(ASSINADOS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+
+      setSuccessMsg("CNES atualizado com sucesso.");
+      setEditOpen(false);
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Erro ao atualizar CNES.");
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   // =========================
@@ -979,21 +1049,61 @@ export default function ListarPdfs() {
             <Alert severity="info">Nenhum PDF encontrado com os filtros atuais.</Alert>
           ) : (
             <List disablePadding>
-              {filteredPdfs.map((p) => (
-                <ListItem
-                  key={p.filename}
-                  sx={{
-                    border: "1px solid",
-                    borderColor: "grey.200",
-                    borderRadius: 2,
-                    mb: 1.5,
-                  }}
-                  secondaryAction={
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Tooltip title={isAssinado(p.filename) ? "Assinado" : "Não assinado"}>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                          <AssignmentTurnedInIcon
-                            fontSize="small"
+          {filteredPdfs.map((p) => (
+            <ListItem
+              key={p.filename}
+              sx={{
+                border: "1px solid",
+                borderColor: "grey.200",
+                borderRadius: 2,
+                mb: 1.5,
+              }}
+              secondaryAction={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Tooltip title="Editar CNES">
+                    <IconButton onClick={() => openEditCnes(p)} edge="end">
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Excluir PDF">
+                    <IconButton
+                      onClick={async () => {
+                        if (!API_URL) return;
+                        const ok = window.confirm(
+                          `Excluir o PDF "${p.filename}"? Essa ação não pode ser desfeita.`
+                        );
+                        if (!ok) return;
+                        try {
+                          const resp = await fetch(
+                            `${API_URL}/uploads/${encodeURIComponent(p.filename)}`,
+                            { method: "DELETE" }
+                          );
+                          if (!resp.ok) {
+                            const txt = await resp.text().catch(() => "");
+                            throw new Error(txt || "Erro ao excluir PDF.");
+                          }
+                          setPdfs((prev) => prev.filter((x) => x.filename !== p.filename));
+                          setAssinados((prev) => {
+                            if (prev[p.filename] === undefined) return prev;
+                            const next = { ...prev };
+                            delete next[p.filename];
+                            localStorage.setItem(ASSINADOS_STORAGE_KEY, JSON.stringify(next));
+                            return next;
+                          });
+                          setSuccessMsg("PDF excluído com sucesso.");
+                        } catch (e: any) {
+                          setErrorMsg(e?.message || "Erro ao excluir PDF.");
+                        }
+                      }}
+                      edge="end"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title={isAssinado(p.filename) ? "Assinado" : "Não assinado"}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      <AssignmentTurnedInIcon
+                        fontSize="small"
                             color={isAssinado(p.filename) ? "success" : "disabled"}
                           />
                           <Switch
@@ -1041,6 +1151,28 @@ export default function ListarPdfs() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)}>
+        <DialogTitle>Editar CNES do PDF</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <TextField
+            autoFocus
+            fullWidth
+            label="CNES"
+            value={editCnes}
+            onChange={(e) => setEditCnes(e.target.value)}
+            disabled={savingEdit}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)} disabled={savingEdit}>
+            Cancelar
+          </Button>
+          <Button variant="contained" onClick={saveEditCnes} disabled={savingEdit}>
+            Salvar
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

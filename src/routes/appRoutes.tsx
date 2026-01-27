@@ -12,12 +12,12 @@ export default function AppRoutes() {
   return (
     <Routes>
 
-      <Route path="/" element={<Home />} />
+      {/* <Route path="/" element={<Home />} />
       <Route path="/dados-gestor" element={<DadosGestor />} />
       <Route path="/dados-estadual" element={<DadosEstadual />} />
       <Route path="/dados-municipio" element={<DadosMunicipio />} />
       <Route path="/form-vagas" element={<FormularioVagas />} />
-      <Route path="/upload" element={<UploadArquivos />} />
+      <Route path="/upload" element={<UploadArquivos />} /> */}
       <Route path="/listar-pdf" element={<ListarPdfs />} />
       <Route path="/reenvio" element={<ReenviarDocumentos />} />
 
