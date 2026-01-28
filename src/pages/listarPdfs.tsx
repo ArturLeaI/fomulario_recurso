@@ -53,6 +53,7 @@ type PdfItem = {
   sizeKB: number;
   createdAt: string | Date;
   url: string;
+  nivel_gestao?: string | null;
 };
 
 type PdfListResponse =
@@ -97,6 +98,26 @@ function friendlyNameFromFilename(filename: string) {
   return base.replace(/_/g, " ").trim();
 }
 
+function normalizeNivelGestao(value: unknown) {
+  const s = String(value ?? "").trim().toUpperCase();
+  if (!s) return "";
+  const hasM = s.includes("MUNIC");
+  const hasE = s.includes("ESTAD");
+  if (hasM && hasE) return "AMBOS";
+  if (["DOBRO", "AMBOS", "MISTO", "DUPLO", "DUPLA"].includes(s)) return "AMBOS";
+  if (hasM) return "MUNICIPAL";
+  if (hasE) return "ESTADUAL";
+  return s;
+}
+
+function matchesNivelGestao(value: unknown, filtro: NivelGestaoFiltro) {
+  if (filtro === "TODOS") return true;
+  const n = normalizeNivelGestao(value);
+  if (filtro === "MUNICIPAL") return n === "MUNICIPAL" || n === "AMBOS";
+  if (filtro === "ESTADUAL") return n === "ESTADUAL" || n === "AMBOS";
+  return true;
+}
+
 function joinUrl(base: string, pathname: string) {
   const b = String(base || "").replace(/\/+$/, "");
   const p = String(pathname || "").replace(/^\/+/, "");
@@ -127,6 +148,7 @@ async function persistAssinado(filename: string, assinado: boolean) {
 
 // ✅ filtro de status
 type StatusFiltro = "TODOS" | "ASSINADOS" | "NAO_ASSINADOS";
+type NivelGestaoFiltro = "TODOS" | "MUNICIPAL" | "ESTADUAL";
 
 export default function ListarPdfs() {
   const navigate = useNavigate();
@@ -144,6 +166,7 @@ export default function ListarPdfs() {
   const [cnes, setCnes] = useState<string>("");
 
   const [statusFiltro, setStatusFiltro] = useState<StatusFiltro>("TODOS");
+  const [nivelGestaoFiltro, setNivelGestaoFiltro] = useState<NivelGestaoFiltro>("TODOS");
   const [query, setQuery] = useState("");
   const [showCnesFilter, setShowCnesFilter] = useState(true);
   const [showNaoAssinadosFilter, setShowNaoAssinadosFilter] = useState(true);
@@ -172,6 +195,7 @@ export default function ListarPdfs() {
   const deferredUf = useDeferredValue(uf);
   const deferredCnes = useDeferredValue(cnes);
   const deferredStatusFiltro = useDeferredValue(statusFiltro);
+  const deferredNivelGestaoFiltro = useDeferredValue(nivelGestaoFiltro);
   const deferredQuery = useDeferredValue(query);
   const deferredAssinados = useDeferredValue(assinados);
 
@@ -237,7 +261,9 @@ export default function ListarPdfs() {
       const newFilename = (data as any).filename as string;
       setPdfs((prev) =>
         prev.map((p) =>
-          p.filename === editFilename ? { ...p, filename: newFilename, cnes: cnesValue } : p
+          p.filename === editFilename
+            ? { ...p, filename: newFilename, cnes: cnesValue, nivel_gestao: null }
+            : p
         )
       );
 
@@ -594,6 +620,10 @@ export default function ListarPdfs() {
       list = list.filter((p) => !deferredAssinados[p.filename]);
     }
 
+    if (deferredNivelGestaoFiltro !== "TODOS") {
+      list = list.filter((p) => matchesNivelGestao(p.nivel_gestao, deferredNivelGestaoFiltro));
+    }
+
     const q = deferredQuery.trim().toLowerCase();
     if (q) {
       list = list.filter((p) => {
@@ -619,6 +649,7 @@ export default function ListarPdfs() {
     deferredCnes,
     deferredUf,
     deferredStatusFiltro,
+    deferredNivelGestaoFiltro,
     deferredQuery,
     deferredAssinados,
   ]);
@@ -631,7 +662,14 @@ export default function ListarPdfs() {
 
   useEffect(() => {
     setPage(1);
-  }, [deferredCnes, deferredUf, deferredStatusFiltro, deferredQuery, filteredPdfs.length]);
+  }, [
+    deferredCnes,
+    deferredUf,
+    deferredStatusFiltro,
+    deferredNivelGestaoFiltro,
+    deferredQuery,
+    filteredPdfs.length,
+  ]);
 
   // ✅ lista de CNES (únicos) dos PDFs NÃO assinados (respeita filtros atuais)
   const cnesNaoAssinados = useMemo(() => {
@@ -837,6 +875,20 @@ export default function ListarPdfs() {
                 <MenuItem value="NAO_ASSINADOS">Não assinados</MenuItem>
               </TextField>
             </Grid>
+
+            <Grid size={{ xs: 12, md: 3 }}>
+              <TextField
+                select
+                fullWidth
+                label="Gestão"
+                value={nivelGestaoFiltro}
+                onChange={(e) => setNivelGestaoFiltro(e.target.value as NivelGestaoFiltro)}
+              >
+                <MenuItem value="TODOS">Todas</MenuItem>
+                <MenuItem value="MUNICIPAL">Municipal</MenuItem>
+                <MenuItem value="ESTADUAL">Estadual</MenuItem>
+              </TextField>
+            </Grid>
           </Grid>
 
           <TextField
@@ -864,6 +916,11 @@ export default function ListarPdfs() {
               <Chip label={`CNES: ${cnes}${selectedEstab ? ` — ${selectedEstab.nome}` : ""}`} />
             )}
             {statusLabel && <Chip label={`Status: ${statusLabel}`} />}
+            {nivelGestaoFiltro !== "TODOS" && (
+              <Chip
+                label={`Gestão: ${nivelGestaoFiltro === "MUNICIPAL" ? "Municipal" : "Estadual"}`}
+              />
+            )}
           </Stack>
 
           <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
@@ -1152,8 +1209,9 @@ export default function ListarPdfs() {
                           Arquivo: {p.filename}
                         </Typography>
                         <Typography variant="caption" display="block">
-                          CNES: {normalizeCnes(p.cnes) || "-"} • Tamanho: {p.sizeKB} KB • Criado em:{" "}
-                          {formatPtBrDate(p.createdAt)}
+                          CNES: {normalizeCnes(p.cnes) || "-"} • Gestão:{" "}
+                          {normalizeNivelGestao(p.nivel_gestao) || "-"} • Tamanho: {p.sizeKB} KB •
+                          Criado em: {formatPtBrDate(p.createdAt)}
                         </Typography>
                       </Box>
                     }
